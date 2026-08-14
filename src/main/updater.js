@@ -49,8 +49,9 @@ const crypto = require("node:crypto");
 const { spawn } = require("node:child_process");
 const settings = require("./settings");
 
-const REPO_OWNER = "SVAH-X";
-const REPO_NAME = "claude-code-but-priestess";
+// Patched build: updates come from the patched project's own GitHub release.
+const REPO_OWNER = "xtd1145";
+const REPO_NAME = "prts-deskpet-patched";
 const RELEASES_PAGE = `https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/latest`;
 const RELEASES_API = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases?per_page=15`;
 const UA = {

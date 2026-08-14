@@ -5,7 +5,7 @@
 
 本仓库包含应用完整源码（`src/`、`assets/`）+ 我们打的所有补丁（`patches/`），以及一个可直接运行的完整版便携包（见 GitHub Releases）。
 
-## 相对原版的 7 项补丁
+## 相对原版的 8 项补丁
 
 1. **开机自启动** — 托盘新增「开机自启动」开关，通过 `app.setLoginItemSettings` 写 Windows Run 键（`src/main/main.js` 的 `applyAutoLaunch`）。
 2. **DSH 控制插件** — 新增 `src/main/dsh-control.js`：管理 127.0.0.1:3080 的 DeepSeek Harness 服务（启动/停止/状态探测）+ 最小 RPC 客户端（`session.list / prompt / cancel / host.describe`）；托盘新增 "DeepSeek Harness" 区块；独立「DSH 控制台」窗口（`src/renderer/dsh-control.html/.js`）。
@@ -14,6 +14,7 @@
 5. **桌宠窗口行为插件** — 托盘新增「固定在前台」（`setAlwaysOnTop`，screen-saver 层级）与「鼠标穿透」（`setIgnoreMouseEvents`，点击穿透、悬停仍转发）两个开关，设置持久化，创建窗口时自动应用。
 6. **桌宠界面鼠标穿透开关** — 桌宠右上角新增纯图标按钮，直接在桌宠上切换鼠标穿透（开启时通过"可交互小区域"技巧保持按钮本身可点，文字说明在托盘）。
 7. **数据目录继承** — `src/main/main.js` 顶部将 `userData` 固定到 `%APPDATA%\claude-code-but-priestess`，安装版可直接继承原版配置/人设/记忆/对话。
+8. **自动更新** — 更新源指向本仓库（`xtd1145/prts-deskpet-patched`）：Windows 走 electron-updater + NSIS，启动后自动检查、由用户决定下载安装（托盘可手动检查/下载）；`electron-builder.yml` 已配好 `publish`（GitHub provider）。
 
 ## 目录
 

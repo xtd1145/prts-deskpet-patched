@@ -192,6 +192,16 @@ const EDITS = [
     '    if (patch && "outfit" in patch && desktopPet && !desktopPet.isDestroyed()) {\n      desktopPet.webContents.send("settings:state", buildSettingsState());\n    }\n  });',
     '    if (patch && "outfit" in patch && desktopPet && !desktopPet.isDestroyed()) {\n      desktopPet.webContents.send("settings:state", buildSettingsState());\n    }\n    // Keep the pet\'s icon toggle in sync when click-through is flipped from\n    // the tray menu while the pet is already on screen.\n    if (patch && "desktopPetClickThrough" in patch && desktopPet && !desktopPet.isDestroyed()) {\n      desktopPet.webContents.send("desktop-pet:click-through-state", settings.get("desktopPetClickThrough") === true);\n    }\n  });']
   ,
+  // ══ feature 7: data directory inheritance (userData pinned) ══
+  ['src/main/main.js',
+    'const { spawnCli } = require("./cli-spawn");',
+    'const { spawnCli } = require("./cli-spawn");\n\n// ── patched build: keep the original data directory ────────────────────────\n// A packaged build derives its userData from the app name; pin it to the\n// original app\'s data folder so existing settings (backend URL / key), the\n// persona notes, memory and conversation history carry straight into this\n// patched version. No-op for the original install (same path).\ntry {\n  app.setPath("userData", path.join(app.getPath("appData"), "claude-code-but-priestess"));\n} catch (error) {\n  console.warn("main: failed to pin userData", error);\n}']
+  ,
+  // ══ feature 8: auto-update from the patched GitHub repo ══
+  ['src/main/updater.js',
+    'const REPO_OWNER = "SVAH-X";\nconst REPO_NAME = "claude-code-but-priestess";',
+    '// Patched build: updates come from the patched project\'s own GitHub release.\nconst REPO_OWNER = "xtd1145";\nconst REPO_NAME = "prts-deskpet-patched";']
+  ,
 ];
 
 // ── new files copied from the working tree ──
