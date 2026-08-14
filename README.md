@@ -32,9 +32,32 @@ package.json
 
 - **直接运行**：下载 Releases 里的便携包（zip），解压后运行 `PRTS.exe` 即可（无需安装）。
 - **从源码构建**：`npm install` 后 `npm start`（需 Electron；本仓库未包含 node_modules）。
+- **构建安装包（含 DSH 询问流程）**：
+  ```bash
+  npm install
+  # Windows（NSIS 安装包，安装时询问是否安装 DeepSeek Harness）
+  npx electron-builder --win nsis --publish never
+  # macOS（需在 macOS 上构建；产出 dmg + zip）
+  npx electron-builder --mac dmg zip --publish never
+  ```
 - **应用更新后重打补丁**：更新会覆盖 `app.asar`，用
   `node patches/prts-reapply-patch.js --install`
   一键重放全部补丁（需在安装目录所在机器的 node 环境执行）。
+
+## DeepSeek Harness 安装（安装包内可选）
+
+Windows 安装包（NSIS）安装完成后会询问**是否安装 DeepSeek Harness**；选择「是」则执行
+`build/installer/install-dsh.ps1`（macOS 由 pkg 脚本调用 `build/installer/install-dsh.sh`）：
+
+1. 检测 Node.js（>= 22）；
+2. `npm install -g @deepseek-ai/dsh`（从公共 npm 下载 dsh CLI）；
+3. 首次 `dsh --profile web` 自动引导 `~/.dsh/profiles/web`（含依赖树）；
+4. 注册开机自启（Windows：HKCU Run 启动脚本；macOS：LaunchAgent）；
+5. 立即启动 DSH Web 服务（127.0.0.1:3080）。
+
+脚本也随应用打包在 `resources/tools/`，可在应用内（DSH 面板）重装/修复。macOS 上构建带
+DSH 选项的 pkg 请参考 `build/installer/` 内脚本与下方说明（dmg 无交互，首次启动后可在
+托盘「DSH 控制台」中安装/唤醒）。
 
 ## 隐私说明
 

@@ -1,0 +1,60 @@
+# electron-builder config for the patched PRTS build.
+# Auto-update: the Windows build uses electron-updater, which reads the
+# app-update.yml generated from this publish config (GitHub provider).
+appId: local.claude-code-but-priestess.menubar
+productName: PRTS
+electronVersion: 42.3.3
+directories:
+  output: release
+  buildResources: build
+publish:
+  provider: github
+  owner: xtd1145
+  repo: prts-deskpet-patched
+files:
+  - src/**/*
+  - assets/**/*
+  - package.json
+  - "!node_modules/**/*.map"
+# Extra files bundled into the app's resources (and therefore into the
+# installer): the DeepSeek Harness installer script used by the NSIS
+# custom-install step (and available to the running app for re-installs).
+extraResources:
+  - from: build/installer/install-dsh.ps1
+    to: tools/install-dsh.ps1
+  - from: build/installer/install-dsh.sh
+    to: tools/install-dsh.sh
+
+win:
+  icon: assets/character/icon.png
+  target:
+    - target: nsis
+      arch:
+        - x64
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: false
+  createStartMenuShortcut: true
+  shortcutName: PRTS
+  artifactName: PRTS-Installer-v${version}-patched.${ext}
+  # Custom install flow: after app files are copied, asks whether to install
+  # DeepSeek Harness and runs the bundled installer when confirmed.
+  include: build/installer/installer.nsh
+
+# macOS — build these targets on a macOS machine:
+#   npx electron-builder --mac dmg zip
+# (DMG creation and code signing/notarization require macOS tooling.)
+mac:
+  icon: assets/build/icon.icns
+  category: public.app-category.utilities
+  target:
+    - dmg
+    - zip
+  # Ad-hoc signing so the app runs locally without a Developer ID (the app
+  # already implements its own in-place mac update path).
+  identity: null
+  hardenedRuntime: false
+  gatekeeperAssess: false

@@ -30,20 +30,38 @@ const doFetch =
     ? (input, init) => globalThis.fetch(input, init)
     : (input, init) => require("electron").net.fetch(input, init);
 
-/** Resolve launch bits; settings may override the machine defaults. */
+/**
+ * Resolve how to launch the dsh CLI, platform-aware:
+ *   1. explicit settings/env overrides (dshNodePath + dshBinPath) win;
+ *   2. known install locations (Windows legacy install, npm global dirs);
+ *   3. the `dsh` command on PATH (npm global bin — the mac/Linux default).
+ * Returns { cmd, args } ready for spawn().
+ */
 function launchConfig(settings) {
-  return {
-    nodePath:
-      settings.get("dshNodePath") ||
-      process.env.PRTS_DSH_NODE ||
-      "C:\\Program Files\\nodejs\\node.exe",
-    binPath:
-      settings.get("dshBinPath") ||
-      "C:\\Windows\\System32\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js",
-    extraArgs: (settings.get("dshArgs") || "web")
-      .split(/\s+/)
-      .filter(Boolean)
-  };
+  const extraArgs = (settings.get("dshArgs") || "web").split(/\s+/).filter(Boolean);
+  const nodePath = settings.get("dshNodePath") || process.env.PRTS_DSH_NODE || "node";
+  const binPath = settings.get("dshBinPath");
+  if (binPath) return { cmd: nodePath, args: [binPath, ...extraArgs] };
+  const candidates = [];
+  if (process.platform === "win32") {
+    // The legacy install used by 启动DSH.bat on this machine.
+    candidates.push("C:\\Windows\\System32\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js");
+    // npm global install (Windows).
+    candidates.push(
+      path.join(process.env.APPDATA || "", "npm", "node_modules", "@deepseek-ai", "dsh", "lib", "bin.js")
+    );
+  } else {
+    // npm global install (macOS / Linux), common prefixes.
+    candidates.push("/usr/local/lib/node_modules/@deepseek-ai/dsh/lib/bin.js");
+    candidates.push(path.join(process.env.HOME || "", ".npm-global", "lib", "node_modules", "@deepseek-ai", "dsh", "lib", "bin.js"));
+  }
+  for (const candidate of candidates) {
+    if (candidate && fs.existsSync(candidate)) {
+      return { cmd: nodePath, args: [candidate, ...extraArgs] };
+    }
+  }
+  // Fall back to the `dsh` command on PATH (npm global bin).
+  return { cmd: "dsh", args: [...extraArgs] };
 }
 
 // The child we spawned (null when the service was started externally).
@@ -101,7 +119,7 @@ async function start({ logFile, settings } = {}) {
     }
   }
   try {
-    child = spawn(cfg.nodePath, [cfg.binPath, ...cfg.extraArgs], {
+    child = spawn(cfg.cmd, cfg.args, {
       detached: true,
       windowsHide: true,
       stdio
