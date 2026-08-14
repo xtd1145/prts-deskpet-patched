@@ -1,0 +1,12 @@
+{
+  "name": "claude-code-but-priestess",
+  "version": "0.7.6",
+  "description": "A cross-platform tray companion that lets you chat with 普瑞赛斯, backed by local Claude Code or Codex CLI usage.",
+  "main": "src/main/main.js",
+  "private": true,
+  "author": "",
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "dependencies": {
+    "electron-updater": "^6.8.3"
+  }
+}

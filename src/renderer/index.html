@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PRTS</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="bar" id="dragHandle">
+      <div class="bar-title">
+        <span class="dot" aria-hidden="true"></span>
+        <span>PRTS</span>
+        <span class="version-badge" id="versionBadge" title="App version"></span>
+        <span class="provider-badge" id="providerBadge">Detecting...</span>
+        <span class="agent-badge" id="agentBadge" hidden>⚡ agent</span>
+      </div>
+      <div class="bar-actions">
+        <button type="button" id="clearBtn" class="ghost" title="Clear conversation">Clear</button>
+        <button type="button" id="cancelBtn" class="ghost" title="Stop response" disabled>Stop</button>
+        <button type="button" id="closeBtn" class="ghost window-btn" title="Close window">&times;</button>
+      </div>
+    </header>
+
+    <div class="mode-tabs" id="modeTabs" role="tablist" aria-label="Mode">
+      <button type="button" id="modeChat" class="mode-tab active" role="tab" aria-selected="true">对话</button>
+      <button type="button" id="modeControl" class="mode-tab" role="tab" aria-selected="false">控制 · DSH</button>
+    </div>
+
+    <section class="stage" id="petStage">
+      <canvas id="petCanvas" width="380" height="180"></canvas>
+      <div class="bubble" id="petBubble" aria-live="polite"></div>
+    </section>
+
+    <div class="main-area" id="mainArea">
+      <main class="chat-stream" id="chatStream" aria-live="polite"></main>
+      <div class="preview-divider" id="previewDivider" hidden aria-hidden="true"></div>
+      <aside class="html-preview" id="htmlPreview" hidden>
+        <header class="preview-header">
+          <span class="preview-title" id="previewTitle">HTML Preview</span>
+          <div class="preview-actions">
+            <button type="button" id="openInBrowserBtn" class="ghost preview-btn" title="Open in default browser">Open in Browser</button>
+            <button type="button" id="closePreviewBtn" class="ghost preview-btn preview-close" title="Close preview">&times;</button>
+          </div>
+        </header>
+        <!-- No allow-same-origin: combined with allow-scripts on a srcdoc
+             iframe it would defeat the sandbox entirely — the (model- or
+             web-derived) HTML would be same-origin with the app UI and could
+             reach window.parent and the bridged IPC APIs. Without it, scripts
+             still run but in an opaque origin that cannot touch the app. -->
+        <iframe id="previewFrame"
+                sandbox="allow-scripts allow-forms allow-modals"
+                srcdoc=""
+                title="HTML Preview"
+                allow="clipboard-write"></iframe>
+      </aside>
+    </div>
+
+    <section class="dsh-control-view" id="dshControlView" hidden>
+      <div class="dshc-card">
+        <div class="dshc-status-line">
+          <span class="dshc-dot" id="dshcStatusDot"></span>
+          <span id="dshcStatusText">检测 DSH 服务…</span>
+        </div>
+        <div class="dshc-row">
+          <button type="button" id="dshcStartBtn" class="ghost">唤醒 DSH</button>
+          <button type="button" id="dshcStopBtn" class="ghost" disabled>停止服务</button>
+          <button type="button" id="dshcOpenBtn" class="ghost" disabled>打开面板</button>
+          <button type="button" id="dshcRefreshBtn" class="ghost">刷新</button>
+        </div>
+        <div class="dshc-toggle-row">
+          <input type="checkbox" id="dshcAutoStart" />
+          <label for="dshcAutoStart">随 PRTS 启动 DSH</label>
+        </div>
+      </div>
+      <div class="dshc-card">
+        <div class="dshc-label">会话（点击选择发送目标）</div>
+        <div class="dshc-sessions" id="dshcSessions">
+          <div class="dshc-empty" id="dshcSessionsHint">（暂无会话 / 服务未运行）</div>
+        </div>
+        <input type="text" id="dshcMsg" class="dshc-input" placeholder="向选中的 agent 发送消息…" spellcheck="false" />
+        <div class="dshc-row">
+          <button type="button" id="dshcSendBtn" class="ghost dshc-primary">发送</button>
+          <button type="button" id="dshcSteerBtn" class="ghost">打断</button>
+          <button type="button" id="dshcCancelBtn" class="ghost dshc-danger" disabled>停止回合</button>
+        </div>
+        <div id="dshcStatusLine" class="dshc-status-line dshc-small"></div>
+      </div>
+    </section>
+
+    <footer class="composer">
+      <div id="attachmentChips" class="attachment-chips"></div>
+      <form id="composer" autocomplete="off">
+        <button type="button" id="attachBtn" class="attach-btn" aria-label="Attach files or images" title="添加文件 / 图片（也可拖入）">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+        </button>
+        <textarea
+          id="composerInput"
+          placeholder="Talk to her…  (Shift+Enter for newline)"
+          rows="1"
+          spellcheck="false"
+        ></textarea>
+        <button type="submit" id="sendBtn" class="primary" aria-label="Send">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 12l16-8-6 16-3-7-7-1z" />
+          </svg>
+        </button>
+      </form>
+      <p class="cwd-line" id="cwdLine"></p>
+    </footer>
+
+    <div class="resize-edge e" data-edge="e" aria-hidden="true"></div>
+    <div class="resize-edge w" data-edge="w" aria-hidden="true"></div>
+    <div class="resize-edge s" data-edge="s" aria-hidden="true"></div>
+    <div class="resize-edge sw" data-edge="sw" aria-hidden="true"></div>
+    <div class="resize-grip resize-edge se" data-edge="se" aria-hidden="true"></div>
+
+    <div id="attachmentLightbox" class="lightbox" hidden>
+      <button type="button" class="lightbox-close" id="lightboxClose" aria-label="关闭">&times;</button>
+      <img id="lightboxImg" alt="" />
+    </div>
+
+    <script src="./renderer.js"></script>
+    <script src="./dsh-control-inline.js"></script>
+  </body>
+</html>
