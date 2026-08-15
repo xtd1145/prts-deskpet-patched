@@ -23,6 +23,7 @@ const proactive = require("./proactive");
 const updater = require("./updater");
 const priestessProvider = require("./priestess-provider");
 const dshControl = require("./dsh-control");
+const feedback = require("./feedback");
 const { spawnCli } = require("./cli-spawn");
 
 // ── patched build: keep the original data directory ────────────────────────
@@ -108,6 +109,7 @@ let creditsWindow = null;
 let dshControlWindow = null;
 let dshStatusCache = { running: false, sessions: 0, error: null, port: dshControl.DSH_PORT };
 let dshStatusTimer = null;
+let feedbackWindow = null;
 
 // Contributors, ordered by first contribution. Roles are one concise line each
 // (a credits screen, not a changelog). The artist is listed last with her own
@@ -1067,6 +1069,7 @@ const MENU_TEXT = {
     dshOpenPanel: "打开 DSH 面板",
     dshOpenControl: "DSH 控制台…",
     dshAutoStart: "随 PRTS 启动 DSH 服务",
+    feedbackItem: "意见反馈…",
     sizeSmall: "小",
     sizeMedium: "中",
     sizeLarge: "大",
@@ -1143,6 +1146,7 @@ const MENU_TEXT = {
     dshOpenPanel: "Open DSH panel",
     dshOpenControl: "DSH console…",
     dshAutoStart: "Start DSH with PRTS",
+    feedbackItem: "Feedback…",
     sizeSmall: "Small",
     sizeMedium: "Medium",
     sizeLarge: "Large",
@@ -1556,6 +1560,41 @@ function openDshControl() {
   });
 }
 
+// 意见反馈 window: feature request / bug report, submitted to GitHub Issues.
+function openFeedbackWindow() {
+  if (feedbackWindow && !feedbackWindow.isDestroyed()) {
+    feedbackWindow.show();
+    feedbackWindow.focus();
+    return;
+  }
+  feedbackWindow = new BrowserWindow({
+    width: 520,
+    height: 560,
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    show: false,
+    title: "PRTS · 意见反馈",
+    backgroundColor: nativeTheme.shouldUseDarkColors ? "#11151a" : "#e9edf2",
+    webPreferences: {
+      preload: path.join(__dirname, "preload.js"),
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  });
+  feedbackWindow.setMenuBarVisibility?.(false);
+  hardenWebContents(feedbackWindow.webContents);
+  feedbackWindow.loadFile(path.join(__dirname, "..", "renderer", "feedback.html"));
+  feedbackWindow.once("ready-to-show", () => {
+    feedbackWindow?.show();
+    feedbackWindow?.focus();
+  });
+  feedbackWindow.on("closed", () => {
+    feedbackWindow = null;
+  });
+}
+
 function buildContextMenu() {
   const all = settings.getAll();
   return Menu.buildFromTemplate([
@@ -1766,6 +1805,10 @@ function buildContextMenu() {
       type: "checkbox",
       checked: all.dshAutoStart === true,
       click: (item) => settings.set({ dshAutoStart: item.checked })
+    },
+    {
+      label: mt("feedbackItem"),
+      click: () => openFeedbackWindow()
     },
     {
       label: mt("setChatDirectory"),
@@ -2193,6 +2236,24 @@ ipcMain.handle("dsh:set-auto-start", (_, value) => {
 
 ipcMain.handle("dsh:open-panel", () => {
   shell.openExternal("http://127.0.0.1:3080");
+});
+
+// ── Feedback ────────────────────────────────────────────────────────────────
+ipcMain.handle("feedback:submit", (_, { type, title, body }) =>
+  feedback.submit({
+    type,
+    title,
+    body,
+    onCode: (payload) => {
+      if (feedbackWindow && !feedbackWindow.isDestroyed()) {
+        feedbackWindow.webContents.send("feedback:device-code", payload);
+      }
+    }
+  })
+);
+
+ipcMain.handle("feedback:open-prefilled", (_, url) => {
+  if (typeof url === "string" && url.startsWith("https://github.com/")) shell.openExternal(url);
 });
 
 ipcMain.handle("popover:move", (_, point) => movePopoverTo(point));

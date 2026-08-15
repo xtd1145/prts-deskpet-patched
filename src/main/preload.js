@@ -77,6 +77,12 @@ contextBridge.exposeInMainWorld("dshApi", {
   openPanel: () => ipcRenderer.invoke("dsh:open-panel")
 });
 
+contextBridge.exposeInMainWorld("feedbackApi", {
+  submit: (payload) => ipcRenderer.invoke("feedback:submit", payload),
+  onDeviceCode: onChannel("feedback:device-code"),
+  openPrefilled: (url) => ipcRenderer.invoke("feedback:open-prefilled", url)
+});
+
 contextBridge.exposeInMainWorld("chatApi", {
   send: (text, attachments) => ipcRenderer.invoke("chat:send", { text, attachments }),
   pickFiles: () => ipcRenderer.invoke("chat:pick-files"),

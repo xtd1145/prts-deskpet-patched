@@ -202,14 +202,50 @@ const EDITS = [
     'const REPO_OWNER = "SVAH-X";\nconst REPO_NAME = "claude-code-but-priestess";',
     '// Patched build: updates come from the patched project\'s own GitHub release.\nconst REPO_OWNER = "xtd1145";\nconst REPO_NAME = "prts-deskpet-patched";']
   ,
+  // ══ feature 9: 意见反馈 (feedback → GitHub issues) ══
+  ['src/main/main.js',
+    'const dshControl = require("./dsh-control");',
+    'const dshControl = require("./dsh-control");\nconst feedback = require("./feedback");']
+  ,
+  ['src/main/main.js',
+    'let dshStatusTimer = null;',
+    'let dshStatusTimer = null;\nlet feedbackWindow = null;']
+  ,
+  ['src/main/main.js',
+    '  dshControlWindow.on("closed", () => {\n    dshControlWindow = null;\n  });\n}',
+    '  dshControlWindow.on("closed", () => {\n    dshControlWindow = null;\n  });\n}\n\n// 意见反馈 window: feature request / bug report, submitted to GitHub Issues.\nfunction openFeedbackWindow() {\n  if (feedbackWindow && !feedbackWindow.isDestroyed()) {\n    feedbackWindow.show();\n    feedbackWindow.focus();\n    return;\n  }\n  feedbackWindow = new BrowserWindow({\n    width: 520,\n    height: 560,\n    resizable: false,\n    minimizable: false,\n    maximizable: false,\n    fullscreenable: false,\n    show: false,\n    title: "PRTS · 意见反馈",\n    backgroundColor: nativeTheme.shouldUseDarkColors ? "#11151a" : "#e9edf2",\n    webPreferences: {\n      preload: path.join(__dirname, "preload.js"),\n      contextIsolation: true,\n      nodeIntegration: false\n    }\n  });\n  feedbackWindow.setMenuBarVisibility?.(false);\n  hardenWebContents(feedbackWindow.webContents);\n  feedbackWindow.loadFile(path.join(__dirname, "..", "renderer", "feedback.html"));\n  feedbackWindow.once("ready-to-show", () => {\n    feedbackWindow?.show();\n    feedbackWindow?.focus();\n  });\n  feedbackWindow.on("closed", () => {\n    feedbackWindow = null;\n  });\n}']
+  ,
+  ['src/main/main.js',
+    'ipcMain.handle("dsh:open-panel", () => {\n  shell.openExternal("http://127.0.0.1:3080");\n});',
+    'ipcMain.handle("dsh:open-panel", () => {\n  shell.openExternal("http://127.0.0.1:3080");\n});\n\n// ── Feedback ────────────────────────────────────────────────────────────────\nipcMain.handle("feedback:submit", (_, { type, title, body }) =>\n  feedback.submit({\n    type,\n    title,\n    body,\n    onCode: (payload) => {\n      if (feedbackWindow && !feedbackWindow.isDestroyed()) {\n        feedbackWindow.webContents.send("feedback:device-code", payload);\n      }\n    }\n  })\n);\n\nipcMain.handle("feedback:open-prefilled", (_, url) => {\n  if (typeof url === "string" && url.startsWith("https://github.com/")) shell.openExternal(url);\n});']
+  ,
+  ['src/main/main.js',
+    '    {\n      label: mt("dshAutoStart"),\n      type: "checkbox",\n      checked: all.dshAutoStart === true,\n      click: (item) => settings.set({ dshAutoStart: item.checked })\n    },',
+    '    {\n      label: mt("dshAutoStart"),\n      type: "checkbox",\n      checked: all.dshAutoStart === true,\n      click: (item) => settings.set({ dshAutoStart: item.checked })\n    },\n    {\n      label: mt("feedbackItem"),\n      click: () => openFeedbackWindow()\n    },']
+  ,
+  ['src/main/main.js',
+    '    dshAutoStart: "随 PRTS 启动 DSH 服务",',
+    '    dshAutoStart: "随 PRTS 启动 DSH 服务",\n    feedbackItem: "意见反馈…",']
+  ,
+  ['src/main/main.js',
+    '    dshAutoStart: "Start DSH with PRTS",',
+    '    dshAutoStart: "Start DSH with PRTS",\n    feedbackItem: "Feedback…",']
+  ,
+  ['src/main/preload.js',
+    'contextBridge.exposeInMainWorld("chatApi", {',
+    'contextBridge.exposeInMainWorld("feedbackApi", {\n  submit: (payload) => ipcRenderer.invoke("feedback:submit", payload),\n  onDeviceCode: onChannel("feedback:device-code"),\n  openPrefilled: (url) => ipcRenderer.invoke("feedback:open-prefilled", url)\n});\n\ncontextBridge.exposeInMainWorld("chatApi", {']
+  ,
 ];
 
 // ── new files copied from the working tree ──
 const NEW_FILES = [
   'src/main/dsh-control.js',
+  'src/main/feedback.js',
   'src/renderer/dsh-control.html',
   'src/renderer/dsh-control.js',
-  'src/renderer/dsh-control-inline.js'
+  'src/renderer/dsh-control-inline.js',
+  'src/renderer/feedback.html',
+  'src/renderer/feedback.js'
 ];
 
 // Apply the anchored edits in memory.
