@@ -1,0 +1,14 @@
+#!/bin/bash
+# DSH choice postinstall (runs as root inside the pkg). Stage the installer
+# script and mark that the Doctor opted in — the actual download/setup runs at
+# first app launch (as the user, with the right HOME/PATH), where it can
+# register the LaunchAgent correctly.
+set -e
+SHARE_DIR="/usr/local/share/prts"
+mkdir -p "$SHARE_DIR"
+if [ -f "/usr/local/share/prts/install-dsh.sh" ]; then
+  cp "/usr/local/share/prts/install-dsh.sh" "$SHARE_DIR/install-dsh.sh"
+fi
+chmod +x "$SHARE_DIR/install-dsh.sh"
+touch "$SHARE_DIR/.dsh-requested"
+exit 0

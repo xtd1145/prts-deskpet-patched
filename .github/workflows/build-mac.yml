@@ -1,0 +1,94 @@
+name: build-mac
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g. 0.7.10)'
+        required: true
+        default: '0.7.10'
+
+permissions:
+  contents: write
+
+jobs:
+  mac:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Set version
+        run: npm version "${{ github.event.inputs.version }}" --no-git-tag-version
+
+      - name: Build macOS app (dmg + zip, unsigned/ad-hoc)
+        run: npx electron-builder --mac dmg zip --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: Build one-click pkg with DeepSeek Harness choice
+        run: |
+          set -e
+          VERSION="${{ github.event.inputs.version }}"
+          DIST=build/installer/mac-pkg/dist
+          mkdir -p "$DIST"
+          # PRTS app component (install to /Applications)
+          pkgbuild \
+            --component "release/mac/PRTS.app" \
+            --install-location /Applications \
+            --identifier com.prts.app \
+            --version "$VERSION" \
+            "$DIST/PRTS-app.pkg"
+          # DeepSeek Harness choice component: stage the installer script and
+          # write the opt-in marker; the actual download/setup happens at first
+          # app launch (as the user, correct HOME/PATH for npm + LaunchAgent).
+          DSHROOT=build/installer/mac-pkg/dsh-pkg/root/usr/local/share/prts
+          mkdir -p "$DSHROOT"
+          cp build/installer/install-dsh.sh "$DSHROOT/install-dsh.sh"
+          chmod +x "$DSHROOT/install-dsh.sh"
+          chmod +x build/installer/mac-pkg/dsh-pkg/scripts/postinstall
+          pkgbuild \
+            --root build/installer/mac-pkg/dsh-pkg/root \
+            --scripts build/installer/mac-pkg/dsh-pkg/scripts \
+            --identifier com.prts.dsh \
+            --version "$VERSION" \
+            "$DIST/PRTS-dsh.pkg"
+          # Assemble with the custom distribution (choice page)
+          sed "s/__VERSION__/$VERSION/g" build/installer/mac-pkg/distribution.xml > "$DIST/distribution.xml"
+          productbuild \
+            --distribution "$DIST/distribution.xml" \
+            --package-path "$DIST" \
+            "$DIST/PRTS-Installer-v${VERSION}-mac.pkg"
+
+      - name: Create release and upload macOS artifacts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          VERSION="${{ github.event.inputs.version }}"
+          TAG="v${VERSION}"
+          DIST=build/installer/mac-pkg/dist
+          FILES=(release/mac/*.dmg release/mac/*.zip release/latest-mac.yml "$DIST/PRTS-Installer-v${VERSION}-mac.pkg")
+          if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            gh release upload "$TAG" --repo "${{ github.repository }}" --clobber "${FILES[@]}"
+          else
+            gh release create "$TAG" \
+              --repo "${{ github.repository }}" \
+              --title "PRTS 桌宠完整版 v${VERSION}（含 macOS 一键安装包）" \
+              --notes "macOS：DMG（拖拽安装）、PKG 一键安装包（可勾选 DeepSeek Harness）、ZIP（自动更新）。Windows 资产由维护者上传到同一 Release。" \
+              "${FILES[@]}"
+          fi
+          echo "release_url=$(gh release view "$TAG" --repo "${{ github.repository }}" --json html_url -q .html_url)" >> "$GITHUB_ENV"
+
+      - name: Summary
+        run: |
+          echo "## macOS build done" >> "$GITHUB_STEP_SUMMARY"
+          echo "- DMG / ZIP / PKG + latest-mac.yml" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Release: ${{ env.release_url }}" >> "$GITHUB_STEP_SUMMARY"

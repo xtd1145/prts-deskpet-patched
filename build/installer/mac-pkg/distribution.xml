@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<installer-gui-script minSpecVersion="2">
+  <title>PRTS 桌宠 · DeepSeek Harness</title>
+  <organization>local.prts</organization>
+  <domains enable_anywhere="false" enable_currentUserHome="false" enable_localSystem="true" />
+  <options customize="always" require-scripts="true" hostArchitectures="x86_64,arm64" />
+  <choices-outline>
+    <line choice="appChoice" />
+    <line choice="dshChoice" />
+  </choices-outline>
+  <choice id="appChoice" title="PRTS 主程序" description="普瑞赛斯桌宠（完整版，含全部补丁）。" selected="YES">
+    <pkg-ref id="com.prts.app" />
+  </choice>
+  <choice id="dshChoice" title="DeepSeek Harness" description="DSH Web 服务（127.0.0.1:3080），为普瑞赛斯提供 AI 控制能力。首次启动应用时会自动完成下载与配置（需 Node.js &gt;= 22）。" selected="YES">
+    <pkg-ref id="com.prts.dsh" />
+  </choice>
+  <pkg-ref id="com.prts.app" version="__VERSION__" onConclusion="none">PRTS-app.pkg</pkg-ref>
+  <pkg-ref id="com.prts.dsh" version="__VERSION__" onConclusion="none">PRTS-dsh.pkg</pkg-ref>
+</installer-gui-script>

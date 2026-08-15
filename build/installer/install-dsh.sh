@@ -32,7 +32,8 @@ STEP "Node.js v$VER OK"
 
 # ── 2. npm install -g ───────────────────────────────────────────────────────
 STEP "npm 安装 @deepseek-ai/dsh…"
-npm install -g "@deepseek-ai/dsh@0.1.0-rc.6"
+# --unsafe-perm keeps this working even when run as root (pkg postinstall).
+npm install -g --unsafe-perm=true "@deepseek-ai/dsh@0.1.0-rc.6"
 if [ $? -ne 0 ]; then ERR "npm 安装失败。"; exit 3; fi
 
 # ── 3. bootstrap the web profile ────────────────────────────────────────────

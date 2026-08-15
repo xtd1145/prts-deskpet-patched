@@ -267,6 +267,22 @@ async function status() {
   }
 }
 
+/** Whether the dsh CLI is installed on this machine (any known location). */
+function isInstalled(settingsFacade) {
+  const cfg = launchConfig(settingsFacade || { get: () => undefined });
+  // A PATH fallback (cmd === "dsh") is only "installed" if the command resolves.
+  if (cfg.cmd === "dsh") {
+    const { spawnSync } = require("node:child_process");
+    try {
+      const probe = spawnSync(cfg.cmd, ["--version"], { stdio: "ignore", timeout: 5000 });
+      return !probe.error && probe.status === 0;
+    } catch {
+      return false;
+    }
+  }
+  return fs.existsSync(cfg.args[0]);
+}
+
 module.exports = {
   DSH_PORT,
   DSH_BASE,
@@ -281,5 +297,6 @@ module.exports = {
   listSessions,
   send,
   cancel,
-  status
+  status,
+  isInstalled
 };

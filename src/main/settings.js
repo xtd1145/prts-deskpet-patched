@@ -82,6 +82,8 @@ const DEFAULTS = Object.freeze({
   dshNodePath: "",
   dshBinPath: "",
   dshArgs: "",
+  // Whether the first-run "安装 DeepSeek Harness？" offer has been shown.
+  dshFirstRunPrompted: false,
   popoverSize: { width: 380, height: 560 },
   // Freeform persona supplement written by the Doctor in-app. Appended after
   // the base persona as 【博士的补充校准】. Max ~1500 chars; empty = inactive.

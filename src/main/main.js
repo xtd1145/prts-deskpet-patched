@@ -2061,6 +2061,71 @@ app.whenReady().then(() => {
   if (settings.get("dshAutoStart") === true) {
     startDshService();
   }
+  // First-run DeepSeek Harness offer (packaged builds only): if DSH is neither
+  // installed nor running and the Doctor hasn't been asked yet, offer to
+  // install it. The Windows NSIS installer already asks at install time; this
+  // covers macOS dmg/zip installs and any install where the choice was skipped.
+  if (app.isPackaged && settings.get("dshFirstRunPrompted") !== true) {
+    const runDshInstaller = () => {
+      const resources = process.resourcesPath || path.join(__dirname, "..", "..");
+      const script =
+        process.platform === "win32"
+          ? path.join(resources, "tools", "install-dsh.ps1")
+          : path.join(resources, "tools", "install-dsh.sh");
+      const cmd = process.platform === "win32" ? "powershell.exe" : "/bin/bash";
+      const args =
+        process.platform === "win32"
+          ? ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script, "-Start"]
+          : [script, "-s"];
+      if (fs.existsSync(script)) {
+        const { execFile } = require("node:child_process");
+        execFile(cmd, args, { detached: true, windowsHide: true, stdio: "ignore" }).unref();
+        return true;
+      }
+      console.warn("main: install-dsh script not found at", script);
+      return false;
+    };
+    setTimeout(async () => {
+      try {
+        const [running, installed] = await Promise.all([
+          dshControl.isRunning(300).catch(() => false),
+          Promise.resolve(dshControl.isInstalled(settings))
+        ]);
+        if (running || installed) {
+          settings.set({ dshFirstRunPrompted: true });
+          return;
+        }
+        // The macOS pkg's "DeepSeek Harness" choice writes this marker — the
+        // Doctor already opted in during install, so install without asking.
+        const dshRequested =
+          process.platform === "darwin" && fs.existsSync("/usr/local/share/prts/.dsh-requested");
+        if (dshRequested) {
+          settings.set({ dshFirstRunPrompted: true, dshAutoStart: true });
+          runDshInstaller();
+          return;
+        }
+        const choice = await dialog.showMessageBox({
+          type: "question",
+          title: "PRTS · DeepSeek Harness",
+          message: "是否安装 DeepSeek Harness？",
+          detail:
+            "DeepSeek Harness（DSH Web 服务，127.0.0.1:3080）为普瑞赛斯提供 AI 控制能力。\n" +
+            "需要 Node.js（>= 22）：将自动下载 dsh CLI、初始化配置并注册开机自启。\n" +
+            "也可以稍后在托盘「DSH 控制台」中随时安装。",
+          buttons: ["稍后", "立即安装"],
+          defaultId: 1,
+          cancelId: 0
+        });
+        settings.set({ dshFirstRunPrompted: true });
+        if (choice.response === 1) {
+          settings.set({ dshAutoStart: true });
+          runDshInstaller();
+        }
+      } catch (error) {
+        console.warn("main: first-run DSH offer failed", error);
+      }
+    }, 6000);
+  }
   // Keep the opaque (non-macOS) popover fill aligned with the resolved
   // appearance. Fires both when the OS theme changes while in "system" mode
   // and when we flip themeSource via the Appearance menu.
