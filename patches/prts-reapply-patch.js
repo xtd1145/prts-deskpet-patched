@@ -240,17 +240,53 @@ const EDITS = [
     '  {\n    name: "十月祈雨",\n    role: { zh: "图像资源增强性修复", en: "Image assets enhancement" },\n    links: [\n      { label: "B站 @十月祈雨", url: "https://space.bilibili.com/129931520" },\n      { label: "GitHub @OctoberPrayRain", url: "https://github.com/OctoberPrayRain" }\n    ]\n  }\n];',
     '  {\n    name: "十月祈雨",\n    role: { zh: "图像资源增强性修复", en: "Image assets enhancement" },\n    links: [\n      { label: "B站 @十月祈雨", url: "https://space.bilibili.com/129931520" },\n      { label: "GitHub @OctoberPrayRain", url: "https://github.com/OctoberPrayRain" }\n    ]\n  },\n  {\n    name: "普瑞赛斯princess",\n    role: { zh: "补丁完整版需求方与测试", en: "Patched build requester & tester" },\n    links: [{ label: "B站 @普瑞赛斯princess" }]\n  }\n];']
   ,
+  // ══ feature 11: 快捷启动 (quick launch — Steam / SakuraCat / 直播姬 + custom) ══
+  ['src/main/main.js',
+    'const dshControl = require("./dsh-control");\nconst feedback = require("./feedback");',
+    'const dshControl = require("./dsh-control");\nconst feedback = require("./feedback");\nconst quickLaunch = require("./quicklaunch");']
+  ,
+  ['src/main/main.js',
+    'let dshStatusTimer = null;\nlet feedbackWindow = null;',
+    'let dshStatusTimer = null;\nlet feedbackWindow = null;\nlet quickLaunchWindow = null;']
+  ,
+  ['src/main/main.js',
+    '  feedbackWindow.on("closed", () => {\n    feedbackWindow = null;\n  });\n}',
+    '  feedbackWindow.on("closed", () => {\n    feedbackWindow = null;\n  });\n}\n\n// 快捷启动 tray submenu: one item per configured entry (launches on click),\n// then a manage window entry.\nfunction buildQuickLaunchSubmenu() {\n  const entries = quickLaunch.list();\n  const items = entries.map((entry) => ({\n    label: entry.name || entry.path || entry.id,\n    enabled: Boolean(entry.path),\n    click: async () => {\n      const result = await quickLaunch.launch(entry);\n      if (!result.ok) {\n        dialog.showMessageBox({\n          type: "warning",\n          title: "PRTS · 快捷启动",\n          message: result.error || "启动失败"\n        });\n      }\n    }\n  }));\n  if (!entries.length) {\n    items.push({ label: mt("quickLaunchEmpty"), enabled: false });\n  }\n  items.push({ type: "separator" });\n  items.push({\n    label: mt("quickLaunchManage"),\n    click: () => openQuickLaunchWindow()\n  });\n  return items;\n}\n\n// 快捷启动管理 window: edit entries, add apps, launch.\nfunction openQuickLaunchWindow() {\n  if (quickLaunchWindow && !quickLaunchWindow.isDestroyed()) {\n    quickLaunchWindow.show();\n    quickLaunchWindow.focus();\n    return;\n  }\n  quickLaunchWindow = new BrowserWindow({\n    width: 640,\n    height: 480,\n    resizable: true,\n    minimizable: true,\n    maximizable: false,\n    fullscreenable: false,\n    show: false,\n    title: "PRTS · 快捷启动",\n    backgroundColor: nativeTheme.shouldUseDarkColors ? "#11151a" : "#e9edf2",\n    webPreferences: {\n      preload: path.join(__dirname, "preload.js"),\n      contextIsolation: true,\n      nodeIntegration: false\n    }\n  });\n  quickLaunchWindow.setMenuBarVisibility?.(false);\n  hardenWebContents(quickLaunchWindow.webContents);\n  quickLaunchWindow.loadFile(path.join(__dirname, "..", "renderer", "quicklaunch.html"));\n  quickLaunchWindow.once("ready-to-show", () => {\n    quickLaunchWindow?.show();\n    quickLaunchWindow?.focus();\n  });\n  quickLaunchWindow.on("closed", () => {\n    quickLaunchWindow = null;\n  });\n}']
+  ,
+  ['src/main/main.js',
+    'ipcMain.handle("feedback:open-prefilled", (_, url) => {\n  if (typeof url === "string" && url.startsWith("https://github.com/")) shell.openExternal(url);\n});',
+    'ipcMain.handle("feedback:open-prefilled", (_, url) => {\n  if (typeof url === "string" && url.startsWith("https://github.com/")) shell.openExternal(url);\n});\n\n// ── Quick launch ────────────────────────────────────────────────────────────\nipcMain.handle("quicklaunch:list", () => quickLaunch.list());\nipcMain.handle("quicklaunch:save", (_, entries) => quickLaunch.save(entries));\nipcMain.handle("quicklaunch:launch", (_, entry) => quickLaunch.launch(entry));\nipcMain.handle("quicklaunch:known", () => quickLaunch.knownApps());\nipcMain.handle("quicklaunch:pick", () => quickLaunch.pickExecutable());']
+  ,
+  ['src/main/main.js',
+    '    {\n      label: mt("feedbackItem"),\n      click: () => openFeedbackWindow()\n    },',
+    '    {\n      label: mt("feedbackItem"),\n      click: () => openFeedbackWindow()\n    },\n    {\n      label: mt("quickLaunch"),\n      submenu: buildQuickLaunchSubmenu()\n    },']
+  ,
+  ['src/main/main.js',
+    '    feedbackItem: "意见反馈…",',
+    '    feedbackItem: "意见反馈…",\n    quickLaunch: "快捷启动",\n    quickLaunchManage: "管理快捷启动…",\n    quickLaunchEmpty: "（暂无条目，去「管理快捷启动」添加）",']
+  ,
+  ['src/main/main.js',
+    '    feedbackItem: "Feedback…",',
+    '    feedbackItem: "Feedback…",\n    quickLaunch: "Quick Launch",\n    quickLaunchManage: "Manage quick launch…",\n    quickLaunchEmpty: "(no entries — add some in “Manage quick launch”)",']
+  ,
+  ['src/main/preload.js',
+    'contextBridge.exposeInMainWorld("feedbackApi", {\n  submit: (payload) => ipcRenderer.invoke("feedback:submit", payload),\n  onDeviceCode: onChannel("feedback:device-code"),\n  openPrefilled: (url) => ipcRenderer.invoke("feedback:open-prefilled", url)\n});\n\ncontextBridge.exposeInMainWorld("chatApi", {',
+    'contextBridge.exposeInMainWorld("feedbackApi", {\n  submit: (payload) => ipcRenderer.invoke("feedback:submit", payload),\n  onDeviceCode: onChannel("feedback:device-code"),\n  openPrefilled: (url) => ipcRenderer.invoke("feedback:open-prefilled", url)\n});\n\ncontextBridge.exposeInMainWorld("quicklaunchApi", {\n  list: () => ipcRenderer.invoke("quicklaunch:list"),\n  save: (entries) => ipcRenderer.invoke("quicklaunch:save", entries),\n  launch: (entry) => ipcRenderer.invoke("quicklaunch:launch", entry),\n  known: () => ipcRenderer.invoke("quicklaunch:known"),\n  pick: () => ipcRenderer.invoke("quicklaunch:pick")\n});\n\ncontextBridge.exposeInMainWorld("chatApi", {']
+  ,
 ];
 
 // ── new files copied from the working tree ──
 const NEW_FILES = [
   'src/main/dsh-control.js',
   'src/main/feedback.js',
+  'src/main/quicklaunch.js',
   'src/renderer/dsh-control.html',
   'src/renderer/dsh-control.js',
   'src/renderer/dsh-control-inline.js',
   'src/renderer/feedback.html',
-  'src/renderer/feedback.js'
+  'src/renderer/feedback.js',
+  'src/renderer/quicklaunch.html',
+  'src/renderer/quicklaunch.js'
 ];
 
 // Apply the anchored edits in memory.

@@ -24,6 +24,7 @@ const updater = require("./updater");
 const priestessProvider = require("./priestess-provider");
 const dshControl = require("./dsh-control");
 const feedback = require("./feedback");
+const quickLaunch = require("./quicklaunch");
 const { spawnCli } = require("./cli-spawn");
 
 // ── patched build: keep the original data directory ────────────────────────
@@ -110,6 +111,7 @@ let dshControlWindow = null;
 let dshStatusCache = { running: false, sessions: 0, error: null, port: dshControl.DSH_PORT };
 let dshStatusTimer = null;
 let feedbackWindow = null;
+let quickLaunchWindow = null;
 
 // Contributors, ordered by first contribution. Roles are one concise line each
 // (a credits screen, not a changelog). The artist is listed last with her own
@@ -1075,6 +1077,9 @@ const MENU_TEXT = {
     dshOpenControl: "DSH 控制台…",
     dshAutoStart: "随 PRTS 启动 DSH 服务",
     feedbackItem: "意见反馈…",
+    quickLaunch: "快捷启动",
+    quickLaunchManage: "管理快捷启动…",
+    quickLaunchEmpty: "（暂无条目，去「管理快捷启动」添加）",
     sizeSmall: "小",
     sizeMedium: "中",
     sizeLarge: "大",
@@ -1152,6 +1157,9 @@ const MENU_TEXT = {
     dshOpenControl: "DSH console…",
     dshAutoStart: "Start DSH with PRTS",
     feedbackItem: "Feedback…",
+    quickLaunch: "Quick Launch",
+    quickLaunchManage: "Manage quick launch…",
+    quickLaunchEmpty: "(no entries — add some in “Manage quick launch”)",
     sizeSmall: "Small",
     sizeMedium: "Medium",
     sizeLarge: "Large",
@@ -1600,6 +1608,70 @@ function openFeedbackWindow() {
   });
 }
 
+// 快捷启动 tray submenu: one item per configured entry (launches on click),
+// then a manage window entry.
+function buildQuickLaunchSubmenu() {
+  const entries = quickLaunch.list();
+  const items = entries.map((entry) => ({
+    label: entry.name || entry.path || entry.id,
+    enabled: Boolean(entry.path),
+    click: async () => {
+      const result = await quickLaunch.launch(entry);
+      if (!result.ok) {
+        dialog.showMessageBox({
+          type: "warning",
+          title: "PRTS · 快捷启动",
+          message: result.error || "启动失败"
+        });
+      }
+    }
+  }));
+  if (!entries.length) {
+    items.push({ label: mt("quickLaunchEmpty"), enabled: false });
+  }
+  items.push({ type: "separator" });
+  items.push({
+    label: mt("quickLaunchManage"),
+    click: () => openQuickLaunchWindow()
+  });
+  return items;
+}
+
+// 快捷启动管理 window: edit entries, add apps, launch.
+function openQuickLaunchWindow() {
+  if (quickLaunchWindow && !quickLaunchWindow.isDestroyed()) {
+    quickLaunchWindow.show();
+    quickLaunchWindow.focus();
+    return;
+  }
+  quickLaunchWindow = new BrowserWindow({
+    width: 640,
+    height: 480,
+    resizable: true,
+    minimizable: true,
+    maximizable: false,
+    fullscreenable: false,
+    show: false,
+    title: "PRTS · 快捷启动",
+    backgroundColor: nativeTheme.shouldUseDarkColors ? "#11151a" : "#e9edf2",
+    webPreferences: {
+      preload: path.join(__dirname, "preload.js"),
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  });
+  quickLaunchWindow.setMenuBarVisibility?.(false);
+  hardenWebContents(quickLaunchWindow.webContents);
+  quickLaunchWindow.loadFile(path.join(__dirname, "..", "renderer", "quicklaunch.html"));
+  quickLaunchWindow.once("ready-to-show", () => {
+    quickLaunchWindow?.show();
+    quickLaunchWindow?.focus();
+  });
+  quickLaunchWindow.on("closed", () => {
+    quickLaunchWindow = null;
+  });
+}
+
 function buildContextMenu() {
   const all = settings.getAll();
   return Menu.buildFromTemplate([
@@ -1814,6 +1886,10 @@ function buildContextMenu() {
     {
       label: mt("feedbackItem"),
       click: () => openFeedbackWindow()
+    },
+    {
+      label: mt("quickLaunch"),
+      submenu: buildQuickLaunchSubmenu()
     },
     {
       label: mt("setChatDirectory"),
@@ -2325,6 +2401,13 @@ ipcMain.handle("feedback:submit", (_, { type, title, body }) =>
 ipcMain.handle("feedback:open-prefilled", (_, url) => {
   if (typeof url === "string" && url.startsWith("https://github.com/")) shell.openExternal(url);
 });
+
+// ── Quick launch ────────────────────────────────────────────────────────────
+ipcMain.handle("quicklaunch:list", () => quickLaunch.list());
+ipcMain.handle("quicklaunch:save", (_, entries) => quickLaunch.save(entries));
+ipcMain.handle("quicklaunch:launch", (_, entry) => quickLaunch.launch(entry));
+ipcMain.handle("quicklaunch:known", () => quickLaunch.knownApps());
+ipcMain.handle("quicklaunch:pick", () => quickLaunch.pickExecutable());
 
 ipcMain.handle("popover:move", (_, point) => movePopoverTo(point));
 

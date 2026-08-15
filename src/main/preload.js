@@ -83,6 +83,14 @@ contextBridge.exposeInMainWorld("feedbackApi", {
   openPrefilled: (url) => ipcRenderer.invoke("feedback:open-prefilled", url)
 });
 
+contextBridge.exposeInMainWorld("quicklaunchApi", {
+  list: () => ipcRenderer.invoke("quicklaunch:list"),
+  save: (entries) => ipcRenderer.invoke("quicklaunch:save", entries),
+  launch: (entry) => ipcRenderer.invoke("quicklaunch:launch", entry),
+  known: () => ipcRenderer.invoke("quicklaunch:known"),
+  pick: () => ipcRenderer.invoke("quicklaunch:pick")
+});
+
 contextBridge.exposeInMainWorld("chatApi", {
   send: (text, attachments) => ipcRenderer.invoke("chat:send", { text, attachments }),
   pickFiles: () => ipcRenderer.invoke("chat:pick-files"),
