@@ -25,7 +25,9 @@ jobs:
         run: npm install --no-audit --no-fund
 
       - name: Set version
-        run: npm version "${{ github.event.inputs.version }}" --no-git-tag-version
+        # --allow-same-version: the repo package.json may already carry the
+        # release version; npm otherwise errors with "Version not changed".
+        run: npm version "${{ github.event.inputs.version }}" --no-git-tag-version --allow-same-version
 
       - name: Build macOS app (universal dmg + zip, unsigned/ad-hoc)
         run: npx electron-builder --mac dmg zip --universal --publish never
