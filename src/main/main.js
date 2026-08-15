@@ -160,6 +160,11 @@ const CREDITS = [
       { label: "B站 @十月祈雨", url: "https://space.bilibili.com/129931520" },
       { label: "GitHub @OctoberPrayRain", url: "https://github.com/OctoberPrayRain" }
     ]
+  },
+  {
+    name: "普瑞赛斯princess",
+    role: { zh: "补丁完整版需求方与测试", en: "Patched build requester & tester" },
+    links: [{ label: "B站 @普瑞赛斯princess" }]
   }
 ];
 // Ephemeral cat Easter egg state — not persisted, changes on each transition.

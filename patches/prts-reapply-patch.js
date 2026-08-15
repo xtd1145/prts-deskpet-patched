@@ -235,6 +235,11 @@ const EDITS = [
     'contextBridge.exposeInMainWorld("chatApi", {',
     'contextBridge.exposeInMainWorld("feedbackApi", {\n  submit: (payload) => ipcRenderer.invoke("feedback:submit", payload),\n  onDeviceCode: onChannel("feedback:device-code"),\n  openPrefilled: (url) => ipcRenderer.invoke("feedback:open-prefilled", url)\n});\n\ncontextBridge.exposeInMainWorld("chatApi", {']
   ,
+  // ══ feature 10: credits entry (B站 @普瑞赛斯princess) ══
+  ['src/main/main.js',
+    '  {\n    name: "十月祈雨",\n    role: { zh: "图像资源增强性修复", en: "Image assets enhancement" },\n    links: [\n      { label: "B站 @十月祈雨", url: "https://space.bilibili.com/129931520" },\n      { label: "GitHub @OctoberPrayRain", url: "https://github.com/OctoberPrayRain" }\n    ]\n  }\n];',
+    '  {\n    name: "十月祈雨",\n    role: { zh: "图像资源增强性修复", en: "Image assets enhancement" },\n    links: [\n      { label: "B站 @十月祈雨", url: "https://space.bilibili.com/129931520" },\n      { label: "GitHub @OctoberPrayRain", url: "https://github.com/OctoberPrayRain" }\n    ]\n  },\n  {\n    name: "普瑞赛斯princess",\n    role: { zh: "补丁完整版需求方与测试", en: "Patched build requester & tester" },\n    links: [{ label: "B站 @普瑞赛斯princess" }]\n  }\n];']
+  ,
 ];
 
 // ── new files copied from the working tree ──
