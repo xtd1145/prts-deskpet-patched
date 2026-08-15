@@ -27,8 +27,8 @@ jobs:
       - name: Set version
         run: npm version "${{ github.event.inputs.version }}" --no-git-tag-version
 
-      - name: Build macOS app (dmg + zip, unsigned/ad-hoc)
-        run: npx electron-builder --mac dmg zip --publish never
+      - name: Build macOS app (universal dmg + zip, unsigned/ad-hoc)
+        run: npx electron-builder --mac dmg zip --universal --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
 
@@ -38,9 +38,13 @@ jobs:
           VERSION="${{ github.event.inputs.version }}"
           DIST=build/installer/mac-pkg/dist
           mkdir -p "$DIST"
+          # Locate the built .app (dir name varies: mac / mac-arm64 / mac-universal)
+          APP_DIR="$(find release -maxdepth 2 -type d -name 'PRTS.app' | head -1)"
+          if [ -z "$APP_DIR" ]; then echo "PRTS.app not found"; exit 1; fi
+          echo "app bundle: $APP_DIR"
           # PRTS app component (install to /Applications)
           pkgbuild \
-            --component "release/mac/PRTS.app" \
+            --component "$APP_DIR" \
             --install-location /Applications \
             --identifier com.prts.app \
             --version "$VERSION" \
@@ -74,7 +78,7 @@ jobs:
           VERSION="${{ github.event.inputs.version }}"
           TAG="v${VERSION}"
           DIST=build/installer/mac-pkg/dist
-          FILES=(release/mac/*.dmg release/mac/*.zip release/latest-mac.yml "$DIST/PRTS-Installer-v${VERSION}-mac.pkg")
+          FILES=(release/*.dmg release/*.zip release/latest-mac.yml "$DIST/PRTS-Installer-v${VERSION}-mac.pkg")
           if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
             gh release upload "$TAG" --repo "${{ github.repository }}" --clobber "${FILES[@]}"
           else
