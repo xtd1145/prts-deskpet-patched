@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PRTS · 快捷启动</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --fg: #1d2733;
+        --fg-dim: #5a6a7a;
+        --bg: #e9edf2;
+        --card: #ffffffb8;
+        --line: #c6cfd9;
+        --accent: #2e7d5b;
+        --accent-fg: #ffffff;
+        --danger: #b3473e;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --fg: #d7e3ec;
+          --fg-dim: #8aa0b2;
+          --bg: #11151a;
+          --card: #1a212b99;
+          --line: #2c3944;
+          --accent: #3fa97c;
+          --accent-fg: #0c1310;
+          --danger: #e07b72;
+        }
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 14px 16px 12px;
+        font: 13px/1.5 -apple-system, "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+        color: var(--fg);
+        background: var(--bg);
+        user-select: none;
+      }
+      h1 { font-size: 15px; margin: 0 0 2px; }
+      p.note { margin: 0 0 10px; color: var(--fg-dim); font-size: 12px; }
+      .known { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+      button {
+        padding: 5px 10px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--card);
+        color: var(--fg);
+        font: inherit;
+        cursor: pointer;
+      }
+      button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); font-weight: 600; }
+      button.danger { border-color: var(--danger); color: var(--danger); }
+      button.small { padding: 2px 8px; font-size: 12px; }
+      .row {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--card);
+        padding: 6px 8px;
+        margin-bottom: 6px;
+      }
+      .row input {
+        flex: 1;
+        min-width: 0;
+        border: none;
+        background: transparent;
+        color: var(--fg);
+        font: inherit;
+        font-size: 12px;
+        outline: none;
+      }
+      .row .lbl { flex: none; width: 86px; font-size: 12px; color: var(--fg-dim); }
+      .row .fld { flex: 2 1 0; min-width: 0; }
+      .row .fld.wide { flex: 3 1 0; }
+      .row .actions { flex: none; display: flex; gap: 4px; }
+      .add-row { margin-top: 10px; }
+      #status { margin-top: 8px; font-size: 12px; min-height: 1.3em; color: var(--fg-dim); }
+      #status.ok { color: var(--accent); }
+      #status.err { color: var(--danger); }
+      .hint { margin-top: 8px; font-size: 11px; color: var(--fg-dim); }
+      .hint code { font-family: ui-monospace, Consolas, monospace; }
+    </style>
+  </head>
+  <body>
+    <h1>快捷启动</h1>
+    <p class="note">托盘「快捷启动」里的程序，点击即启动。可自由增删改。</p>
+
+    <div class="known" id="knownApps"></div>
+
+    <div id="list"></div>
+
+    <div class="row add-row" id="addRow">
+      <span class="lbl">新增</span>
+      <div class="fld"><input id="newName" placeholder="名称" spellcheck="false" /></div>
+      <div class="fld wide"><input id="newPath" placeholder="程序路径（如 C:\Program Files\App\app.exe）" spellcheck="false" /></div>
+      <button type="button" id="browseBtn" class="small">浏览…</button>
+      <button type="button" id="addBtn" class="primary small">添加</button>
+    </div>
+
+    <div id="status"></div>
+    <div class="hint">
+      也可以直接编辑数据目录 settings.json 的 <code>quickLaunch</code> 数组：
+      <code>[{ "name": "应用名", "path": "C:\\...\\app.exe", "args": "" }]</code>（args 可省略）。
+    </div>
+
+    <script src="./quicklaunch.js"></script>
+  </body>
+</html>

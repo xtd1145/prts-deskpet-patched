@@ -273,6 +273,135 @@ const EDITS = [
     'contextBridge.exposeInMainWorld("feedbackApi", {\n  submit: (payload) => ipcRenderer.invoke("feedback:submit", payload),\n  onDeviceCode: onChannel("feedback:device-code"),\n  openPrefilled: (url) => ipcRenderer.invoke("feedback:open-prefilled", url)\n});\n\ncontextBridge.exposeInMainWorld("chatApi", {',
     'contextBridge.exposeInMainWorld("feedbackApi", {\n  submit: (payload) => ipcRenderer.invoke("feedback:submit", payload),\n  onDeviceCode: onChannel("feedback:device-code"),\n  openPrefilled: (url) => ipcRenderer.invoke("feedback:open-prefilled", url)\n});\n\ncontextBridge.exposeInMainWorld("quicklaunchApi", {\n  list: () => ipcRenderer.invoke("quicklaunch:list"),\n  save: (entries) => ipcRenderer.invoke("quicklaunch:save", entries),\n  launch: (entry) => ipcRenderer.invoke("quicklaunch:launch", entry),\n  known: () => ipcRenderer.invoke("quicklaunch:known"),\n  pick: () => ipcRenderer.invoke("quicklaunch:pick")\n});\n\ncontextBridge.exposeInMainWorld("chatApi", {']
   ,
+  // ══ feature 11: DeepSeek talking backend (official API, no local CLI) ══
+  ['src/main/priestess-provider.js',
+    'const { net } = require("electron");',
+    'const { net } = require("electron");\n\n// Official DeepSeek API endpoint (OpenAI-compatible). Fixed on purpose — the\n// generic Priestess backend is there for anyone who wants a custom server.\nconst DEEPSEEK_API_BASE_URL = "https://api.deepseek.com";']
+  ,
+  ['src/main/priestess-provider.js',
+    'module.exports = { startTurn, chatCompletionsUrl, testConnection };',
+    'module.exports = { startTurn, chatCompletionsUrl, testConnection, DEEPSEEK_API_BASE_URL };']
+  ,
+  ['src/main/settings.js',
+    '  priestessEnabled: false,\n  priestessBaseUrl: "http://127.0.0.1:4000",\n  priestessApiKey: "",\n  priestessModel: "",',
+    '  priestessEnabled: false,\n  priestessBaseUrl: "http://127.0.0.1:4000",\n  priestessApiKey: "",\n  priestessModel: "",\n  // Official DeepSeek API backend (https://api.deepseek.com) — the same\n  // built-in HTTP path as Priestess, but the base URL is fixed to DeepSeek\'s\n  // own endpoint so the Doctor only needs an API key. The key and optional\n  // model live ONLY in this local settings.json and are sent only to\n  // api.deepseek.com.\n  deepseekEnabled: false,\n  deepseekApiKey: "",\n  deepseekModel: "",']
+  ,
+  ['src/main/chat.js',
+    '  PRIESTESS: "priestess"\n});',
+    '  PRIESTESS: "priestess",\n  // Official DeepSeek API backend: the same built-in HTTP path as Priestess,\n  // pointed at https://api.deepseek.com. No local CLI — just an API key.\n  DEEPSEEK: "deepseek"\n});']
+  ,
+  ['src/main/chat.js',
+    '  if (provider === PROVIDERS.PRIESTESS) return PROVIDERS.PRIESTESS;\n  return PROVIDERS.CLAUDE;',
+    '  if (provider === PROVIDERS.PRIESTESS) return PROVIDERS.PRIESTESS;\n  if (provider === PROVIDERS.DEEPSEEK) return PROVIDERS.DEEPSEEK;\n  return PROVIDERS.CLAUDE;']
+  ,
+  ['src/main/chat.js',
+    '  if (provider === PROVIDERS.PRIESTESS) return "Priestess (built-in)";\n  return "Claude Code";',
+    '  if (provider === PROVIDERS.PRIESTESS) return "Priestess (built-in)";\n  if (provider === PROVIDERS.DEEPSEEK) return "DeepSeek";\n  return "Claude Code";']
+  ,
+  ['src/main/chat.js',
+    '  if (provider === PROVIDERS.PRIESTESS) return "Priestess";\n  return "Claude";',
+    '  if (provider === PROVIDERS.PRIESTESS) return "Priestess";\n  if (provider === PROVIDERS.DEEPSEEK) return "DeepSeek";\n  return "Claude";']
+  ,
+  ['src/main/chat.js',
+    '    provider: PROVIDERS.PRIESTESS,\n    label: providerLabel(PROVIDERS.PRIESTESS),\n    shortLabel: providerShortLabel(PROVIDERS.PRIESTESS),\n    available,\n    command: null\n  };\n}\n\nfunction scanProviderAvailability() {\n  const previous = providerAvailability;\n  return {\n    [PROVIDERS.CLAUDE]: detectProvider(PROVIDERS.CLAUDE, previous?.[PROVIDERS.CLAUDE]),\n    [PROVIDERS.CODEX]: detectProvider(PROVIDERS.CODEX, previous?.[PROVIDERS.CODEX]),\n    [PROVIDERS.PRIESTESS]: detectPriestessProvider()\n  };\n}',
+    '    provider: PROVIDERS.PRIESTESS,\n    label: providerLabel(PROVIDERS.PRIESTESS),\n    shortLabel: providerShortLabel(PROVIDERS.PRIESTESS),\n    available,\n    command: null\n  };\n}\n\n// The DeepSeek backend is also HTTP-only — "available" when the Doctor enabled\n// it and provided an API key (the base URL is fixed to the official endpoint).\nfunction detectDeepseekProvider() {\n  const available =\n    Boolean(settings.get("deepseekEnabled")) &&\n    Boolean(String(settings.get("deepseekApiKey") || "").trim());\n  return {\n    provider: PROVIDERS.DEEPSEEK,\n    label: providerLabel(PROVIDERS.DEEPSEEK),\n    shortLabel: providerShortLabel(PROVIDERS.DEEPSEEK),\n    available,\n    command: null\n  };\n}\n\nfunction scanProviderAvailability() {\n  const previous = providerAvailability;\n  return {\n    [PROVIDERS.CLAUDE]: detectProvider(PROVIDERS.CLAUDE, previous?.[PROVIDERS.CLAUDE]),\n    [PROVIDERS.CODEX]: detectProvider(PROVIDERS.CODEX, previous?.[PROVIDERS.CODEX]),\n    [PROVIDERS.PRIESTESS]: detectPriestessProvider(),\n    [PROVIDERS.DEEPSEEK]: detectDeepseekProvider()\n  };\n}']
+  ,
+  ['src/main/chat.js',
+    '    [PROVIDERS.PRIESTESS]: empty(PROVIDERS.PRIESTESS)\n  };\n}',
+    '    [PROVIDERS.PRIESTESS]: empty(PROVIDERS.PRIESTESS),\n    [PROVIDERS.DEEPSEEK]: empty(PROVIDERS.DEEPSEEK)\n  };\n}']
+  ,
+  ['src/main/chat.js',
+    '  if (availability[PROVIDERS.CLAUDE]?.available) return PROVIDERS.CLAUDE;\n  if (availability[PROVIDERS.PRIESTESS]?.available) return PROVIDERS.PRIESTESS;\n  return null;',
+    '  if (availability[PROVIDERS.CLAUDE]?.available) return PROVIDERS.CLAUDE;\n  if (availability[PROVIDERS.DEEPSEEK]?.available) return PROVIDERS.DEEPSEEK;\n  if (availability[PROVIDERS.PRIESTESS]?.available) return PROVIDERS.PRIESTESS;\n  return null;']
+  ,
+  ['src/main/chat.js',
+    '    providerAvailability[PROVIDERS.PRIESTESS] = detectPriestessProvider();\n  } else {',
+    '    providerAvailability[PROVIDERS.PRIESTESS] = detectPriestessProvider();\n    providerAvailability[PROVIDERS.DEEPSEEK] = detectDeepseekProvider();\n  } else {']
+  ,
+  ['src/main/chat.js',
+    '  const availableProviders = [PROVIDERS.CLAUDE, PROVIDERS.CODEX, PROVIDERS.PRIESTESS]\n    .filter((provider) => availability[provider]?.available);',
+    '  const availableProviders = [PROVIDERS.CLAUDE, PROVIDERS.CODEX, PROVIDERS.PRIESTESS, PROVIDERS.DEEPSEEK]\n    .filter((provider) => availability[provider]?.available);']
+  ,
+  ['src/main/chat.js',
+    '      [PROVIDERS.PRIESTESS]: { ...(availability[PROVIDERS.PRIESTESS] || detectPriestessProvider()) }\n    }\n  };',
+    '      [PROVIDERS.PRIESTESS]: { ...(availability[PROVIDERS.PRIESTESS] || detectPriestessProvider()) },\n      [PROVIDERS.DEEPSEEK]: { ...(availability[PROVIDERS.DEEPSEEK] || detectDeepseekProvider()) }\n    }\n  };']
+  ,
+  ['src/main/chat.js',
+    '  const sessionPlan = provider === PROVIDERS.PRIESTESS ? null : providerSessionPlan(provider);\n  const sharedTranscript =\n    provider === PROVIDERS.PRIESTESS\n      ? ""\n      : buildSharedTranscript({',
+    '  const sessionPlan =\n    provider === PROVIDERS.PRIESTESS || provider === PROVIDERS.DEEPSEEK\n      ? null\n      : providerSessionPlan(provider);\n  const sharedTranscript =\n    provider === PROVIDERS.PRIESTESS || provider === PROVIDERS.DEEPSEEK\n      ? ""\n      : buildSharedTranscript({']
+  ,
+  ['src/main/chat.js',
+    '  currentProcess = handle;\n  currentTurnHadScreenshot = false;\n}\n\nasync function launchProviderTurn({',
+    '  currentProcess = handle;\n  currentTurnHadScreenshot = false;\n}\n\nfunction launchDeepseekTurn(trimmed) {\n  turnLaunching = false;\n  const turnHadImages = pendingAttachments.some(isImagePath);\n  const memoryRecallRequested = shouldIncludeLongMemoryForText(trimmed);\n  const includeLongMemory = !longMemoryDormant || memoryRecallRequested;\n  const system = persona.buildPersonaPrompt({\n    agentMode: false,\n    screenshotPath: null,\n    provider: PROVIDERS.DEEPSEEK,\n    // History is sent as real chat messages below, so the transcript is not\n    // duplicated into the system prompt.\n    sharedTranscript: "",\n    includeLongMemory,\n    memoryRecallRequested,\n    skillsEnabled: settings.get("skillsEnabled") !== false,\n    deepPersona: shouldUseDeepPersona(trimmed),\n    personaNotes: settings.get("personaNotes") || "",\n    catMode: silentTurnKind ? null : chatCatMode\n  });\n\n  const finishCommon = () => {\n    currentProcess = null;\n    currentProvider = null;\n    const cancelled = cancelRequested;\n    cancelRequested = false;\n    return cancelled;\n  };\n\n  const handle = priestessProvider.startTurn({\n    baseUrl: priestessProvider.DEEPSEEK_API_BASE_URL,\n    apiKey: settings.get("deepseekApiKey"),\n    model: settings.get("deepseekModel"),\n    system,\n    messages: buildPriestessMessages(),\n    onDelta: (text) => {\n      if (currentProcess === handle) appendAssistant(text);\n    },\n    onDone: () => {\n      if (currentProcess !== handle) return;\n      finalizeAssistant(pendingAssistantText);\n      const cancelled = finishCommon();\n      finishTurn(cancelled ? { cancelled: true } : {});\n    },\n    onError: (error) => {\n      if (currentProcess !== handle) return;\n      const cancelled = cancelRequested || error?.name === "AbortError";\n      if (!cancelled) {\n        pushSystem(\n          `\\`DeepSeek\\` 后端出错：${String(error?.message || error).slice(0, 300)}\\n` +\n            (turnHadImages\n              ? "（这一轮发了图片——如果你配的模型不支持看图，请换一个支持视觉的模型，或改用 Claude / Codex 后端。）\\n"\n              : "") +\n            "请在托盘菜单「DeepSeek 设置…」中确认 API Key 与模型名。"\n        );\n      }\n      if (pendingAssistantId) finalizeAssistant(pendingAssistantText);\n      finishCommon();\n      finishTurn(cancelled ? { cancelled: true } : { error: String(error?.message || error) });\n    }\n  });\n  currentProcess = handle;\n  currentTurnHadScreenshot = false;\n}\n\nasync function launchProviderTurn({']
+  ,
+  ['src/main/chat.js',
+    '  if (provider === PROVIDERS.PRIESTESS) {\n    launchPriestessTurn(trimmed);\n    return;\n  }',
+    '  if (provider === PROVIDERS.DEEPSEEK) {\n    launchDeepseekTurn(trimmed);\n    return;\n  }\n\n  if (provider === PROVIDERS.PRIESTESS) {\n    launchPriestessTurn(trimmed);\n    return;\n  }']
+  ,
+  ['src/main/persona.js',
+    '    (provider === "priestess"\n      ? "- 这条通道没有文件工具',
+    '    (provider === "priestess" || provider === "deepseek"\n      ? "- 这条通道没有文件工具']
+  ,
+  ['src/main/persona.js',
+    'provider !== "priestess") {',
+    'provider !== "priestess" && provider !== "deepseek") {']
+  ,
+  ['src/main/persona.js',
+    '    (provider === "priestess"\n      ? "这条通道是你与博士之间的直连对话',
+    '    (provider === "priestess" || provider === "deepseek"\n      ? "这条通道是你与博士之间的直连对话']
+  ,
+  ['src/main/main.js',
+    'let priestessSettingsWindow = null;',
+    'let priestessSettingsWindow = null;\nlet deepseekSettingsWindow = null;']
+  ,
+  ['src/main/main.js',
+    '  priestessSettingsWindow.on("closed", () => {\n    priestessSettingsWindow = null;\n  });\n}',
+    '  priestessSettingsWindow.on("closed", () => {\n    priestessSettingsWindow = null;\n  });\n}\n\n// ============================================================\n//  DeepSeek backend settings — a small local-only window. The API\n//  key / model are stored in settings.json inside userData and are\n//  only ever sent to https://api.deepseek.com.\n// ============================================================\nfunction openDeepseekSettings() {\n  if (deepseekSettingsWindow && !deepseekSettingsWindow.isDestroyed()) {\n    deepseekSettingsWindow.show();\n    deepseekSettingsWindow.focus();\n    return;\n  }\n  deepseekSettingsWindow = new BrowserWindow({\n    width: 460,\n    height: 560,\n    resizable: false,\n    minimizable: false,\n    maximizable: false,\n    fullscreenable: false,\n    show: false,\n    title: "PRTS · DeepSeek",\n    backgroundColor: nativeTheme.shouldUseDarkColors ? "#11151a" : "#e9edf2",\n    webPreferences: {\n      preload: path.join(__dirname, "preload.js"),\n      contextIsolation: true,\n      nodeIntegration: false\n    }\n  });\n  deepseekSettingsWindow.setMenuBarVisibility?.(false);\n  hardenWebContents(deepseekSettingsWindow.webContents);\n  deepseekSettingsWindow.loadFile(\n    path.join(__dirname, "..", "renderer", "deepseek-settings.html")\n  );\n  deepseekSettingsWindow.once("ready-to-show", () => {\n    deepseekSettingsWindow?.show();\n    deepseekSettingsWindow?.focus();\n  });\n  deepseekSettingsWindow.on("closed", () => {\n    deepseekSettingsWindow = null;\n  });\n}']
+  ,
+  ['src/main/main.js',
+    '    priestessSettings: "内置普瑞赛斯设置…",\n    personaNotes: "补充校准…",\n    modelClaude: "模型（Claude）",\n    modelCodex: "模型（Codex）",\n    defaultClaude: "默认（CLI/账户）",\n    defaultCodex: "默认（CLI/config）",',
+    '    priestessSettings: "内置普瑞赛斯设置…",\n    deepseekSettings: "DeepSeek 设置…",\n    personaNotes: "补充校准…",\n    modelClaude: "模型（Claude）",\n    modelCodex: "模型（Codex）",\n    modelDeepseek: "模型（DeepSeek）",\n    defaultClaude: "默认（CLI/账户）",\n    defaultCodex: "默认（CLI/config）",\n    defaultDeepseek: "默认（deepseek-chat）",']
+  ,
+  ['src/main/main.js',
+    '    priestessSettings: "Built-in Priestess settings…",\n    personaNotes: "Persona supplement…",\n    modelClaude: "Model (Claude)",\n    modelCodex: "Model (Codex)",\n    defaultClaude: "Default (CLI/account)",\n    defaultCodex: "Default (CLI/config)",',
+    '    priestessSettings: "Built-in Priestess settings…",\n    deepseekSettings: "DeepSeek settings…",\n    personaNotes: "Persona supplement…",\n    modelClaude: "Model (Claude)",\n    modelCodex: "Model (Codex)",\n    modelDeepseek: "Model (DeepSeek)",\n    defaultClaude: "Default (CLI/account)",\n    defaultCodex: "Default (CLI/config)",\n    defaultDeepseek: "Default (deepseek-chat)",']
+  ,
+  ['src/main/main.js',
+    '    {\n      label: mt("priestessSettings"),\n      click: () => openPriestessSettings()\n    },',
+    '    {\n      label: mt("priestessSettings"),\n      click: () => openPriestessSettings()\n    },\n    {\n      label: mt("deepseekSettings"),\n      click: () => openDeepseekSettings()\n    },']
+  ,
+  ['src/main/main.js',
+    '  codex: [\n    { labelKey: "defaultCodex", value: "" }\n  ]\n};',
+    '  codex: [\n    { labelKey: "defaultCodex", value: "" }\n  ],\n  deepseek: [\n    { labelKey: "defaultDeepseek", value: "" },\n    { type: "separator" },\n    { label: "deepseek-chat（V3 · 通用对话）", value: "deepseek-chat" },\n    { label: "deepseek-reasoner（R1 · 深度推理）", value: "deepseek-reasoner" }\n  ]\n};']
+  ,
+  ['src/main/main.js',
+    'function modelSettingKey(provider) {\n  return provider === "codex" ? "codexModel" : "claudeModel";\n}',
+    'function modelSettingKey(provider) {\n  if (provider === "codex") return "codexModel";\n  if (provider === "deepseek") return "deepseekModel";\n  return "claudeModel";\n}']
+  ,
+  ['src/main/main.js',
+    '  const label = provider === "codex" ? mt("modelCodex") : mt("modelClaude");',
+    '  const label =\n    provider === "codex"\n      ? mt("modelCodex")\n      : provider === "deepseek"\n        ? mt("modelDeepseek")\n        : mt("modelClaude");']
+  ,
+  ['src/main/main.js',
+    'ipcMain.handle("priestess:close-settings", () => {\n  priestessSettingsWindow?.close();\n});',
+    'ipcMain.handle("priestess:close-settings", () => {\n  priestessSettingsWindow?.close();\n});\n\n// DeepSeek backend config — read/written only to local settings.json. The base\n// URL is fixed to the official endpoint; the Doctor only manages the key and\n// the optional model.\nipcMain.handle("deepseek:get-config", () => ({\n  enabled: Boolean(settings.get("deepseekEnabled")),\n  baseUrl: priestessProvider.DEEPSEEK_API_BASE_URL,\n  apiKey: String(settings.get("deepseekApiKey") || ""),\n  model: String(settings.get("deepseekModel") || "")\n}));\n\nipcMain.handle("deepseek:set-config", (_, cfg) => {\n  settings.set({\n    deepseekEnabled: Boolean(cfg?.enabled),\n    deepseekApiKey: String(cfg?.apiKey ?? "").trim(),\n    deepseekModel: String(cfg?.model ?? "").trim()\n  });\n  chat.refreshProviderAvailability();\n  syncTrayTooltip();\n  return { ok: true };\n});\n\nipcMain.handle("deepseek:test-connection", (_, cfg) =>\n  priestessProvider.testConnection({\n    baseUrl: priestessProvider.DEEPSEEK_API_BASE_URL,\n    apiKey: String(cfg?.apiKey ?? settings.get("deepseekApiKey") ?? "")\n  })\n);\n\nipcMain.handle("deepseek:close-settings", () => {\n  deepseekSettingsWindow?.close();\n});']
+  ,
+  ['src/main/preload.js',
+    'contextBridge.exposeInMainWorld("priestessApi", {\n  getConfig: () => ipcRenderer.invoke("priestess:get-config"),\n  setConfig: (cfg) => ipcRenderer.invoke("priestess:set-config", cfg),\n  testConnection: (cfg) => ipcRenderer.invoke("priestess:test-connection", cfg),\n  closeSettings: () => ipcRenderer.invoke("priestess:close-settings")\n});',
+    'contextBridge.exposeInMainWorld("priestessApi", {\n  getConfig: () => ipcRenderer.invoke("priestess:get-config"),\n  setConfig: (cfg) => ipcRenderer.invoke("priestess:set-config", cfg),\n  testConnection: (cfg) => ipcRenderer.invoke("priestess:test-connection", cfg),\n  closeSettings: () => ipcRenderer.invoke("priestess:close-settings")\n});\n\ncontextBridge.exposeInMainWorld("deepseekApi", {\n  getConfig: () => ipcRenderer.invoke("deepseek:get-config"),\n  setConfig: (cfg) => ipcRenderer.invoke("deepseek:set-config", cfg),\n  testConnection: (cfg) => ipcRenderer.invoke("deepseek:test-connection", cfg),\n  closeSettings: () => ipcRenderer.invoke("deepseek:close-settings")\n});']
+  ,
+  ['src/renderer/renderer.js',
+    '      (activeProvider === "codex" ? "Codex" : activeProvider ? "Claude" : "No CLI")',
+    '      (activeProvider === "codex"\n        ? "Codex"\n        : activeProvider === "deepseek"\n          ? "DeepSeek"\n          : activeProvider\n            ? "Claude"\n            : "No CLI")']
+  ,
+  ['src/renderer/renderer.js',
+    '    ph_no_cli: "请先安装 Claude Code 或 Codex CLI…",',
+    '    ph_no_cli: "请先安装 Claude Code / Codex CLI，或在托盘开启内置后端…",']
+  ,
+  ['src/renderer/renderer.js',
+    '    ph_no_cli: "Install Claude Code or Codex CLI first…",',
+    '    ph_no_cli: "Install Claude Code / Codex CLI or enable a built-in backend first…",']
+  ,
 ];
 
 // ── new files copied from the working tree ──
@@ -286,7 +415,10 @@ const NEW_FILES = [
   'src/renderer/feedback.html',
   'src/renderer/feedback.js',
   'src/renderer/quicklaunch.html',
-  'src/renderer/quicklaunch.js'
+  'src/renderer/quicklaunch.js',
+  // feature 11: DeepSeek backend settings window
+  'src/renderer/deepseek-settings.html',
+  'src/renderer/deepseek-settings.js'
 ];
 
 // Apply the anchored edits in memory.

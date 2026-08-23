@@ -5,7 +5,7 @@
 
 本仓库包含应用完整源码（`src/`、`assets/`）+ 我们打的所有补丁（`patches/`），以及一个可直接运行的完整版便携包（见 GitHub Releases）。
 
-## 相对原版的 10 项补丁
+## 相对原版的 11 项补丁
 
 1. **开机自启动** — 托盘新增「开机自启动」开关，通过 `app.setLoginItemSettings` 写 Windows Run 键（`src/main/main.js` 的 `applyAutoLaunch`）。
 2. **DSH 控制插件** — 新增 `src/main/dsh-control.js`：管理 127.0.0.1:3080 的 DeepSeek Harness 服务（启动/停止/状态探测）+ 最小 RPC 客户端（`session.list / prompt / cancel / host.describe`）；托盘新增 "DeepSeek Harness" 区块；独立「DSH 控制台」窗口（`src/renderer/dsh-control.html/.js`）。
@@ -24,6 +24,7 @@
     ]
     ```
     （`id` 可留空自动生成；`args` 可省略；路径里反斜杠要写 `\\`）。
+11. **DeepSeek 说话后端** — 托盘「使用后端」新增 **DeepSeek** 选项：不依赖本地 CLI，直连 DeepSeek 官方 API（`https://api.deepseek.com`），只需在托盘「DeepSeek 设置…」里填一个 API Key（可选选模型 `deepseek-chat` / `deepseek-reasoner`，可「测试连接」）。人设、记忆、心情表情、技能指令全部照常工作；设置项 `deepseekEnabled / deepseekApiKey / deepseekModel` 仅存本机 `settings.json`，密钥只发送给 api.deepseek.com。
 
 ## 目录
 

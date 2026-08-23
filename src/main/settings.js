@@ -16,6 +16,14 @@ const DEFAULTS = Object.freeze({
   priestessBaseUrl: "http://127.0.0.1:4000",
   priestessApiKey: "",
   priestessModel: "",
+  // Official DeepSeek API backend (https://api.deepseek.com) — the same
+  // built-in HTTP path as Priestess, but the base URL is fixed to DeepSeek's
+  // own endpoint so the Doctor only needs an API key. The key and optional
+  // model live ONLY in this local settings.json and are sent only to
+  // api.deepseek.com.
+  deepseekEnabled: false,
+  deepseekApiKey: "",
+  deepseekModel: "",
   chatCwd: "",
   // Appearance: "system" follows the OS light/dark setting; "light"/"dark"
   // force a fixed appearance. Drives nativeTheme.themeSource, which in turn

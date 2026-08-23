@@ -13,6 +13,10 @@
 
 const { net } = require("electron");
 
+// Official DeepSeek API endpoint (OpenAI-compatible). Fixed on purpose — the
+// generic Priestess backend is there for anyone who wants a custom server.
+const DEEPSEEK_API_BASE_URL = "https://api.deepseek.com";
+
 // Accept base URLs with or without /v1 (or a full /chat/completions path).
 // A trailing /anthropic (the Anthropic-format base DeepSeek documents for CLIs)
 // is OpenAI-incompatible — the gateway serves the OpenAI surface from the
@@ -256,4 +260,4 @@ async function testConnection({ baseUrl, apiKey }) {
   }
 }
 
-module.exports = { startTurn, chatCompletionsUrl, testConnection };
+module.exports = { startTurn, chatCompletionsUrl, testConnection, DEEPSEEK_API_BASE_URL };

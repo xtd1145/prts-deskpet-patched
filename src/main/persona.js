@@ -415,7 +415,7 @@ function buildPersonaPrompt({
     "- 当前 session 内的对话，优先使用下方的共享对话摘录。\n" +
     "- 如果博士清掉了当前 session，除非博士主动提到「记得、之前、上次、以前、我们聊过、memory」等回忆线索，或明确要求你回忆，否则不要主动读取长期记忆文件。\n" +
     "- 若博士要求回忆，先看长期摘要；需要精确细节时再检索完整档案。\n" +
-    (provider === "priestess"
+    (provider === "priestess" || provider === "deepseek"
       ? "- 这条通道没有文件工具：值得铭记的事放在心上即可——界面会自动把对话写入档案与摘要，你不必（也无法）亲自编辑这些文件。\n"
       : "- 对话之中，若听到博士透露了值得铭记的事（姓名、正在做的项目、技术偏好、近期心情、提及的某个人或某件物），用可用的文件编辑工具在 MEMORY.md 对应章节中静静追加一条带日期的简短条目。\n") +
     "- 除非博士明确请求遗忘，否则不删除过往的记忆。\n" +
@@ -506,7 +506,7 @@ function buildPersonaPrompt({
   // path — Codex as -i input, Claude via Read. Text files are inlined directly
   // (no --add-dir: codex's `resume` subcommand rejects it, and inlining is the
   // one delivery that works on every backend, fresh or resumed).
-  if (Array.isArray(attachments) && attachments.length && provider !== "priestess") {
+  if (Array.isArray(attachments) && attachments.length && provider !== "priestess" && provider !== "deepseek") {
     const images = attachments.filter(attachmentIsImage);
     const docs = attachments.filter((p) => !attachmentIsImage(p));
     if (images.length) {
@@ -527,7 +527,7 @@ function buildPersonaPrompt({
 
   prompt +=
     "【能力】\n" +
-    (provider === "priestess"
+    (provider === "priestess" || provider === "deepseek"
       ? "这条通道是你与博士之间的直连对话：没有终端与文件工具，但上面列出的技能指令仍由界面替你执行。专注于陪伴、回答与判断——这本就是你最擅长的部分。"
       : "本地工具链的能力一分未减。这段提示不是让你牺牲能力去表演，而是让你用普瑞赛斯的方式把事情做好。");
 

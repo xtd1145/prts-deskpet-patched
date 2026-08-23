@@ -19,7 +19,10 @@ const PROVIDERS = Object.freeze({
   // Built-in backend: PRTS speaks to an OpenAI-compatible server directly
   // (LiteLLM by default) — no local CLI required. Chat + skills + memory
   // injection work; CLI file tools and agent mode do not apply.
-  PRIESTESS: "priestess"
+  PRIESTESS: "priestess",
+  // Official DeepSeek API backend: the same built-in HTTP path as Priestess,
+  // pointed at https://api.deepseek.com. No local CLI — just an API key.
+  DEEPSEEK: "deepseek"
 });
 const SHARED_TRANSCRIPT_MAX_CHARS = 9000;
 const RECENT_TRANSCRIPT_MESSAGE_LIMIT = 24;
@@ -345,6 +348,7 @@ function applyAttachmentsToPriestessMessages(messages) {
 function normalizeProvider(provider) {
   if (provider === PROVIDERS.CODEX) return PROVIDERS.CODEX;
   if (provider === PROVIDERS.PRIESTESS) return PROVIDERS.PRIESTESS;
+  if (provider === PROVIDERS.DEEPSEEK) return PROVIDERS.DEEPSEEK;
   return PROVIDERS.CLAUDE;
 }
 
@@ -356,12 +360,14 @@ function activeProvider() {
 function providerLabel(provider = activeProvider()) {
   if (provider === PROVIDERS.CODEX) return "Codex";
   if (provider === PROVIDERS.PRIESTESS) return "Priestess (built-in)";
+  if (provider === PROVIDERS.DEEPSEEK) return "DeepSeek";
   return "Claude Code";
 }
 
 function providerShortLabel(provider = activeProvider()) {
   if (provider === PROVIDERS.CODEX) return "Codex";
   if (provider === PROVIDERS.PRIESTESS) return "Priestess";
+  if (provider === PROVIDERS.DEEPSEEK) return "DeepSeek";
   return "Claude";
 }
 
@@ -553,12 +559,28 @@ function detectPriestessProvider() {
   };
 }
 
+// The DeepSeek backend is also HTTP-only — "available" when the Doctor enabled
+// it and provided an API key (the base URL is fixed to the official endpoint).
+function detectDeepseekProvider() {
+  const available =
+    Boolean(settings.get("deepseekEnabled")) &&
+    Boolean(String(settings.get("deepseekApiKey") || "").trim());
+  return {
+    provider: PROVIDERS.DEEPSEEK,
+    label: providerLabel(PROVIDERS.DEEPSEEK),
+    shortLabel: providerShortLabel(PROVIDERS.DEEPSEEK),
+    available,
+    command: null
+  };
+}
+
 function scanProviderAvailability() {
   const previous = providerAvailability;
   return {
     [PROVIDERS.CLAUDE]: detectProvider(PROVIDERS.CLAUDE, previous?.[PROVIDERS.CLAUDE]),
     [PROVIDERS.CODEX]: detectProvider(PROVIDERS.CODEX, previous?.[PROVIDERS.CODEX]),
-    [PROVIDERS.PRIESTESS]: detectPriestessProvider()
+    [PROVIDERS.PRIESTESS]: detectPriestessProvider(),
+    [PROVIDERS.DEEPSEEK]: detectDeepseekProvider()
   };
 }
 
@@ -581,7 +603,8 @@ function emptyProviderAvailability() {
   return {
     [PROVIDERS.CLAUDE]: empty(PROVIDERS.CLAUDE),
     [PROVIDERS.CODEX]: empty(PROVIDERS.CODEX),
-    [PROVIDERS.PRIESTESS]: empty(PROVIDERS.PRIESTESS)
+    [PROVIDERS.PRIESTESS]: empty(PROVIDERS.PRIESTESS),
+    [PROVIDERS.DEEPSEEK]: empty(PROVIDERS.DEEPSEEK)
   };
 }
 
@@ -590,6 +613,7 @@ function selectAvailableProvider(requested, availability = ensureProviderAvailab
   if (availability[normalized]?.available) return normalized;
   if (availability[PROVIDERS.CODEX]?.available) return PROVIDERS.CODEX;
   if (availability[PROVIDERS.CLAUDE]?.available) return PROVIDERS.CLAUDE;
+  if (availability[PROVIDERS.DEEPSEEK]?.available) return PROVIDERS.DEEPSEEK;
   if (availability[PROVIDERS.PRIESTESS]?.available) return PROVIDERS.PRIESTESS;
   return null;
 }
@@ -615,9 +639,10 @@ function refreshProviderAvailability() {
     now - providerAvailabilityScannedAt < PROVIDER_RESCAN_TTL_MS &&
     anyCliAvailable(providerAvailability);
   if (fresh) {
-    // The built-in backend's availability is just settings — keep it live
-    // within the TTL so toggling it in the settings window applies instantly.
+    // The built-in backends' availability is just settings — keep them live
+    // within the TTL so toggling them in the settings windows applies instantly.
     providerAvailability[PROVIDERS.PRIESTESS] = detectPriestessProvider();
+    providerAvailability[PROVIDERS.DEEPSEEK] = detectDeepseekProvider();
   } else {
     providerAvailability = scanProviderAvailability();
     providerAvailabilityScannedAt = now;
@@ -635,7 +660,7 @@ function getProviderAvailability(options = {}) {
   const availability = options.refresh === false
     ? providerAvailability || emptyProviderAvailability()
     : ensureProviderAvailability();
-  const availableProviders = [PROVIDERS.CLAUDE, PROVIDERS.CODEX, PROVIDERS.PRIESTESS]
+  const availableProviders = [PROVIDERS.CLAUDE, PROVIDERS.CODEX, PROVIDERS.PRIESTESS, PROVIDERS.DEEPSEEK]
     .filter((provider) => availability[provider]?.available);
   const active = selectAvailableProvider(settings.get("chatProvider"), availability);
   return {
@@ -644,7 +669,8 @@ function getProviderAvailability(options = {}) {
     providers: {
       [PROVIDERS.CLAUDE]: { ...availability[PROVIDERS.CLAUDE] },
       [PROVIDERS.CODEX]: { ...availability[PROVIDERS.CODEX] },
-      [PROVIDERS.PRIESTESS]: { ...(availability[PROVIDERS.PRIESTESS] || detectPriestessProvider()) }
+      [PROVIDERS.PRIESTESS]: { ...(availability[PROVIDERS.PRIESTESS] || detectPriestessProvider()) },
+      [PROVIDERS.DEEPSEEK]: { ...(availability[PROVIDERS.DEEPSEEK] || detectDeepseekProvider()) }
     }
   };
 }
@@ -2281,7 +2307,9 @@ function send(text, attachments) {
   const providerInfo = ensureProviderAvailability()[provider];
   if (!providerInfo?.available) {
     pushSystem(
-      "No local Claude Code or Codex CLI was found. Install and authenticate one of them, then reopen the tray menu or send again."
+      "No usable backend was found. Install and authenticate a Claude Code or Codex CLI, " +
+      "or enable the built-in Priestess / DeepSeek backend from the tray menu, " +
+      "then reopen the tray menu or send again."
     );
     emitStatus("idle", { error: "missing-cli" });
     return { ok: false, reason: "missing-cli" };
@@ -2331,9 +2359,12 @@ function dispatchSend(
   } else {
     currentUserEntry = pushUser(trimmed, provider, { attachments });
   }
-  const sessionPlan = provider === PROVIDERS.PRIESTESS ? null : providerSessionPlan(provider);
+  const sessionPlan =
+    provider === PROVIDERS.PRIESTESS || provider === PROVIDERS.DEEPSEEK
+      ? null
+      : providerSessionPlan(provider);
   const sharedTranscript =
-    provider === PROVIDERS.PRIESTESS
+    provider === PROVIDERS.PRIESTESS || provider === PROVIDERS.DEEPSEEK
       ? ""
       : buildSharedTranscript({
           provider,
@@ -2377,15 +2408,16 @@ function dispatchSend(
   return { ok: true };
 }
 
-// Token-cost guard for the built-in backend: the CLI paths cap their shared
-// transcript at SHARED_TRANSCRIPT_MAX_CHARS, so this path gets a budget too
-// (a bit larger, since these are her only context besides the system prompt).
-const PRIESTESS_MESSAGES_MAX_CHARS = 16000;
+// Token-cost guard for the built-in HTTP backends (Priestess + DeepSeek): the
+// CLI paths cap their shared transcript at SHARED_TRANSCRIPT_MAX_CHARS, so
+// this path gets a budget too (a bit larger, since these are her only context
+// besides the system prompt).
+const HTTP_MESSAGES_MAX_CHARS = 16000;
 
 // Recent conversational turns as proper chat-completions messages. The current
 // user message is already in history (pushed by dispatchSend); the empty
 // assistant bubble is skipped by the empty-text filter.
-function buildPriestessMessages() {
+function buildHttpBackendMessages() {
   const messages = [];
   for (const entry of history) {
     if (!entry || entry.ephemeral || entry.queued) continue;
@@ -2407,22 +2439,31 @@ function buildPriestessMessages() {
   let total = 0;
   for (let i = messages.length - 1; i >= 0 && kept.length < RECENT_TRANSCRIPT_MESSAGE_LIMIT; i -= 1) {
     const length = messages[i].content.length;
-    if (kept.length && total + length > PRIESTESS_MESSAGES_MAX_CHARS) break;
+    if (kept.length && total + length > HTTP_MESSAGES_MAX_CHARS) break;
     kept.push(messages[i]);
     total += length;
   }
   const result = kept.reverse();
   // Inline this turn's files/images into the final user message (built-in
-  // backend has no file tools). Done after budgeting so the char-length math
-  // above keeps working on plain-string content.
+  // backends have no file tools). Done after budgeting so the char-length
+  // math above keeps working on plain-string content.
   applyAttachmentsToPriestessMessages(result);
   return result;
 }
 
-// Built-in backend turn: stream straight from the configured OpenAI-compatible
-// server. Mood tags, skill directives, and the typewriter all ride the same
+// Shared turn runner for the built-in HTTP backends (Priestess built-in +
+// DeepSeek official API): stream straight from an OpenAI-compatible server.
+// Mood tags, skill directives, and the typewriter all ride the same
 // appendAssistant path the CLIs use.
-function launchPriestessTurn(trimmed) {
+function launchHttpBackendTurn({
+  trimmed,
+  provider,
+  baseUrl,
+  apiKey,
+  model,
+  backendName,
+  settingsMenuHint
+}) {
   turnLaunching = false;
   const turnHadImages = pendingAttachments.some(isImagePath);
   const memoryRecallRequested = shouldIncludeLongMemoryForText(trimmed);
@@ -2430,7 +2471,7 @@ function launchPriestessTurn(trimmed) {
   const system = persona.buildPersonaPrompt({
     agentMode: false,
     screenshotPath: null,
-    provider: PROVIDERS.PRIESTESS,
+    provider,
     // History is sent as real chat messages below, so the transcript is not
     // duplicated into the system prompt.
     sharedTranscript: "",
@@ -2451,11 +2492,11 @@ function launchPriestessTurn(trimmed) {
   };
 
   const handle = priestessProvider.startTurn({
-    baseUrl: settings.get("priestessBaseUrl"),
-    apiKey: settings.get("priestessApiKey"),
-    model: settings.get("priestessModel"),
+    baseUrl,
+    apiKey,
+    model,
     system,
-    messages: buildPriestessMessages(),
+    messages: buildHttpBackendMessages(),
     onDelta: (text) => {
       if (currentProcess === handle) appendAssistant(text);
     },
@@ -2470,11 +2511,11 @@ function launchPriestessTurn(trimmed) {
       const cancelled = cancelRequested || error?.name === "AbortError";
       if (!cancelled) {
         pushSystem(
-          `内置普瑞赛斯后端出错：${String(error?.message || error).slice(0, 300)}\n` +
+          `\`${backendName}\` 后端出错：${String(error?.message || error).slice(0, 300)}\n` +
             (turnHadImages
               ? "（这一轮发了图片——如果你配的模型不支持看图，请换一个支持视觉的模型，或改用 Claude / Codex 后端。）\n"
               : "") +
-            "请在托盘菜单「内置普瑞赛斯设置…」中确认服务器地址、API Key 与模型名。"
+            settingsMenuHint
         );
       }
       if (pendingAssistantId) finalizeAssistant(pendingAssistantText);
@@ -2484,6 +2525,30 @@ function launchPriestessTurn(trimmed) {
   });
   currentProcess = handle;
   currentTurnHadScreenshot = false;
+}
+
+function launchPriestessTurn(trimmed) {
+  launchHttpBackendTurn({
+    trimmed,
+    provider: PROVIDERS.PRIESTESS,
+    baseUrl: settings.get("priestessBaseUrl"),
+    apiKey: settings.get("priestessApiKey"),
+    model: settings.get("priestessModel"),
+    backendName: "内置普瑞赛斯",
+    settingsMenuHint: "请在托盘菜单「内置普瑞赛斯设置…」中确认服务器地址、API Key 与模型名。"
+  });
+}
+
+function launchDeepseekTurn(trimmed) {
+  launchHttpBackendTurn({
+    trimmed,
+    provider: PROVIDERS.DEEPSEEK,
+    baseUrl: priestessProvider.DEEPSEEK_API_BASE_URL,
+    apiKey: settings.get("deepseekApiKey"),
+    model: settings.get("deepseekModel"),
+    backendName: "DeepSeek",
+    settingsMenuHint: "请在托盘菜单「DeepSeek 设置…」中确认 API Key 与模型名。"
+  });
 }
 
 async function launchProviderTurn({
@@ -2498,6 +2563,11 @@ async function launchProviderTurn({
 }) {
   if (currentProcess) {
     turnLaunching = false;
+    return;
+  }
+
+  if (provider === PROVIDERS.DEEPSEEK) {
+    launchDeepseekTurn(trimmed);
     return;
   }
 

@@ -103,6 +103,7 @@ let desktopPetScaleAnchor = null;
 let desktopPetScaleLastAt = 0;
 let windowFadeTimer = null;
 let priestessSettingsWindow = null;
+let deepseekSettingsWindow = null;
 let personaNotesWindow = null;
 let creditsWindow = null;
 // DeepSeek Harness control window + cached service status (refreshed on an
@@ -295,6 +296,47 @@ function openPriestessSettings() {
   });
   priestessSettingsWindow.on("closed", () => {
     priestessSettingsWindow = null;
+  });
+}
+
+// ============================================================
+//  DeepSeek backend settings — a small local-only window. The API
+//  key / model are stored in settings.json inside userData and are
+//  only ever sent to https://api.deepseek.com.
+// ============================================================
+function openDeepseekSettings() {
+  if (deepseekSettingsWindow && !deepseekSettingsWindow.isDestroyed()) {
+    deepseekSettingsWindow.show();
+    deepseekSettingsWindow.focus();
+    return;
+  }
+  deepseekSettingsWindow = new BrowserWindow({
+    width: 460,
+    height: 560,
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    show: false,
+    title: "PRTS · DeepSeek",
+    backgroundColor: nativeTheme.shouldUseDarkColors ? "#11151a" : "#e9edf2",
+    webPreferences: {
+      preload: path.join(__dirname, "preload.js"),
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  });
+  deepseekSettingsWindow.setMenuBarVisibility?.(false);
+  hardenWebContents(deepseekSettingsWindow.webContents);
+  deepseekSettingsWindow.loadFile(
+    path.join(__dirname, "..", "renderer", "deepseek-settings.html")
+  );
+  deepseekSettingsWindow.once("ready-to-show", () => {
+    deepseekSettingsWindow?.show();
+    deepseekSettingsWindow?.focus();
+  });
+  deepseekSettingsWindow.on("closed", () => {
+    deepseekSettingsWindow = null;
   });
 }
 let htmlPanelOpen = false;
@@ -1052,11 +1094,14 @@ const MENU_TEXT = {
     usageBackend: "使用后端",
     usageBackendOne: (provider) => `使用后端：${provider}`,
     priestessSettings: "内置普瑞赛斯设置…",
+    deepseekSettings: "DeepSeek 设置…",
     personaNotes: "补充校准…",
     modelClaude: "模型（Claude）",
     modelCodex: "模型（Codex）",
+    modelDeepseek: "模型（DeepSeek）",
     defaultClaude: "默认（CLI/账户）",
     defaultCodex: "默认（CLI/config）",
+    defaultDeepseek: "默认（deepseek-chat）",
     opusAlias: "Opus（最新别名）",
     sonnetAlias: "Sonnet（最新别名）",
     haikuAlias: "Haiku（最新别名）",
@@ -1132,11 +1177,14 @@ const MENU_TEXT = {
     usageBackend: "Usage backend",
     usageBackendOne: (provider) => `Usage backend: ${provider}`,
     priestessSettings: "Built-in Priestess settings…",
+    deepseekSettings: "DeepSeek settings…",
     personaNotes: "Persona supplement…",
     modelClaude: "Model (Claude)",
     modelCodex: "Model (Codex)",
+    modelDeepseek: "Model (DeepSeek)",
     defaultClaude: "Default (CLI/account)",
     defaultCodex: "Default (CLI/config)",
+    defaultDeepseek: "Default (deepseek-chat)",
     opusAlias: "Opus (latest alias)",
     sonnetAlias: "Sonnet (latest alias)",
     haikuAlias: "Haiku (latest alias)",
@@ -1317,6 +1365,12 @@ const MODEL_PRESETS = {
   ],
   codex: [
     { labelKey: "defaultCodex", value: "" }
+  ],
+  deepseek: [
+    { labelKey: "defaultDeepseek", value: "" },
+    { type: "separator" },
+    { label: "deepseek-chat（V3 · 通用对话）", value: "deepseek-chat" },
+    { label: "deepseek-reasoner（R1 · 深度推理）", value: "deepseek-reasoner" }
   ]
 };
 
@@ -1328,7 +1382,9 @@ let codexModelPresetCache = {
 };
 
 function modelSettingKey(provider) {
-  return provider === "codex" ? "codexModel" : "claudeModel";
+  if (provider === "codex") return "codexModel";
+  if (provider === "deepseek") return "deepseekModel";
+  return "claudeModel";
 }
 
 function parseCodexModelCatalog(stdout) {
@@ -1473,7 +1529,12 @@ function buildModelMenuItems() {
     current = "";
   }
   const visiblePresets = includeCurrentModelPreset(presets, current);
-  const label = provider === "codex" ? mt("modelCodex") : mt("modelClaude");
+  const label =
+    provider === "codex"
+      ? mt("modelCodex")
+      : provider === "deepseek"
+        ? mt("modelDeepseek")
+        : mt("modelClaude");
   return [
     {
       label,
@@ -1792,6 +1853,10 @@ function buildContextMenu() {
     {
       label: mt("priestessSettings"),
       click: () => openPriestessSettings()
+    },
+    {
+      label: mt("deepseekSettings"),
+      click: () => openDeepseekSettings()
     },
     {
       label: mt("personaNotes"),
@@ -2526,6 +2591,38 @@ ipcMain.handle("priestess:test-connection", (_, cfg) =>
 
 ipcMain.handle("priestess:close-settings", () => {
   priestessSettingsWindow?.close();
+});
+
+// DeepSeek backend config — read/written only to local settings.json. The base
+// URL is fixed to the official endpoint; the Doctor only manages the key and
+// the optional model.
+ipcMain.handle("deepseek:get-config", () => ({
+  enabled: Boolean(settings.get("deepseekEnabled")),
+  baseUrl: priestessProvider.DEEPSEEK_API_BASE_URL,
+  apiKey: String(settings.get("deepseekApiKey") || ""),
+  model: String(settings.get("deepseekModel") || "")
+}));
+
+ipcMain.handle("deepseek:set-config", (_, cfg) => {
+  settings.set({
+    deepseekEnabled: Boolean(cfg?.enabled),
+    deepseekApiKey: String(cfg?.apiKey ?? "").trim(),
+    deepseekModel: String(cfg?.model ?? "").trim()
+  });
+  chat.refreshProviderAvailability();
+  syncTrayTooltip();
+  return { ok: true };
+});
+
+ipcMain.handle("deepseek:test-connection", (_, cfg) =>
+  priestessProvider.testConnection({
+    baseUrl: priestessProvider.DEEPSEEK_API_BASE_URL,
+    apiKey: String(cfg?.apiKey ?? settings.get("deepseekApiKey") ?? "")
+  })
+);
+
+ipcMain.handle("deepseek:close-settings", () => {
+  deepseekSettingsWindow?.close();
 });
 
 ipcMain.handle("desktop-pet:cat-mode-get", () => currentCatMode);

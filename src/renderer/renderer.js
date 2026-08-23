@@ -60,7 +60,7 @@ const RENDERER_TEXT = {
     cwd_running: "发送中",
     ph_ready: "和她说点什么…（Shift+Enter 换行）",
     ph_running: "她在回复时可以继续输入消息排队…（Shift+Enter 换行）",
-    ph_no_cli: "请先安装 Claude Code 或 Codex CLI…",
+    ph_no_cli: "请先安装 Claude Code / Codex CLI，或在托盘开启内置后端…",
     btn_clear: "清除",
     btn_clear_title: "清除对话",
     btn_stop: "停止回复",
@@ -89,7 +89,7 @@ const RENDERER_TEXT = {
     cwd_running: "sending",
     ph_ready: "Say something… (Shift+Enter for newline)",
     ph_running: "You can keep typing while she replies… (Shift+Enter newline)",
-    ph_no_cli: "Install Claude Code or Codex CLI first…",
+    ph_no_cli: "Install Claude Code / Codex CLI or enable a built-in backend first…",
     btn_clear: "Clear",
     btn_clear_title: "Clear conversation",
     btn_stop: "Stop",
@@ -2048,7 +2048,13 @@ function refreshComposerMeta() {
   backendReady = !availability || (availability.availableProviders || []).length > 0;
   const provider = backendReady
     ? providerInfo?.shortLabel ||
-      (activeProvider === "codex" ? "Codex" : activeProvider ? "Claude" : "No CLI")
+      (activeProvider === "codex"
+        ? "Codex"
+        : activeProvider === "deepseek"
+          ? "DeepSeek"
+          : activeProvider
+            ? "Claude"
+            : "No CLI")
     : "No CLI";
   const cwd = (payload?.chatCwd || "").trim();
   const queueSuffix = queueLength > 0 ? ` · ${t("cwd_queue", queueLength)}` : "";

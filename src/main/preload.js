@@ -48,6 +48,13 @@ contextBridge.exposeInMainWorld("priestessApi", {
   closeSettings: () => ipcRenderer.invoke("priestess:close-settings")
 });
 
+contextBridge.exposeInMainWorld("deepseekApi", {
+  getConfig: () => ipcRenderer.invoke("deepseek:get-config"),
+  setConfig: (cfg) => ipcRenderer.invoke("deepseek:set-config", cfg),
+  testConnection: (cfg) => ipcRenderer.invoke("deepseek:test-connection", cfg),
+  closeSettings: () => ipcRenderer.invoke("deepseek:close-settings")
+});
+
 contextBridge.exposeInMainWorld("personaNotesApi", {
   get: () => ipcRenderer.invoke("persona-notes:get"),
   set: (notes) => ipcRenderer.invoke("persona-notes:set", notes),
