@@ -80,6 +80,11 @@ const DEFAULTS = Object.freeze({
   // underneath, hover moves still forwarded for cursor feedback).
   desktopPetPinned: true,
   desktopPetClickThrough: false,
+  // OLED burn-in protection for the pet window. "off" = disabled;
+  // "corner" = every 30 min hop to the next of the four screen corners;
+  // "idle-hide" = hide after 30 min without interaction (mouse near her old
+  // spot wakes her). Off by default; chosen from the tray menu.
+  desktopPetBurnIn: "off",
   // Start with Windows at login (writes the HKCU Run key via
   // app.setLoginItemSettings; the tray checkbox owns this setting).
   autoLaunch: false,

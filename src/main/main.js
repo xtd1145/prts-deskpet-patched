@@ -67,6 +67,19 @@ const DESKTOP_PET_SCALE_PRESETS = Object.freeze([
   { labelKey: "sizeLarge", scale: 1.2 },
   { labelKey: "sizeXL", scale: 1.6 }
 ]);
+// OLED burn-in protection for the pet window (tray: 防烧屏保护). Every
+// interval the pet either hops to the next of the four screen corners
+// ("corner") or, after the same period without interaction, fades away and
+// waits for the cursor to come near her old spot to wake ("idle-hide").
+// Interval defaults to 30 minutes; env override is handy for testing.
+const DESKTOP_PET_BURN_IN_MS = Number(process.env.PRTS_DESKTOP_PET_BURN_IN_MS) || 30 * 60 * 1000;
+const DESKTOP_PET_BURN_IN_FADE_MS = 200;
+// Corner hop keeps the same margin from the screen edge as the default spot.
+const DESKTOP_PET_BURN_IN_MARGIN = 24;
+// While hidden by idle-hide, the cursor is polled; waking is edge-triggered
+// (enter the padded home rect) so a cursor parked on her spot doesn't thrash.
+const DESKTOP_PET_BURN_IN_WAKE_PAD = 80;
+const DESKTOP_PET_BURN_IN_POLL_MS = 250;
 
 let tray;
 let popover;
@@ -101,6 +114,15 @@ let pendingDesktopPetScalePosition = null;
 // rapid setBounds() calls.
 let desktopPetScaleAnchor = null;
 let desktopPetScaleLastAt = 0;
+// Burn-in protection engine state (see constants above).
+let burnInVisibleTimer = null; // pending corner hop / idle-hide deadline
+let burnInWakeTimer = null; // cursor poll while hidden by idle-hide
+let burnInFadeTimer = null; // dedicated fade animator for the pet window
+let burnInHiddenByTimer = false; // pet hidden by the idle-hide deadline itself
+let burnInLastInteractAt = 0; // last user drag / scale / summon on the pet
+let burnInLastManipAt = 0; // last physical drag / scroll-scale (corner-hop guard)
+let burnInHome = null; // {x,y,width,height} rect she hid at (wake region)
+let burnInCursorWasIn = false; // edge detection for the wake poll
 let windowFadeTimer = null;
 let priestessSettingsWindow = null;
 let deepseekSettingsWindow = null;
@@ -797,11 +819,13 @@ function createDesktopPet() {
   desktopPet.loadFile(path.join(__dirname, "..", "renderer", "desktop-pet.html"));
   desktopPet.on("closed", () => {
     desktopPet = null;
+    burnInStopAll();
   });
   return desktopPet;
 }
 
 function hideDesktopPet() {
+  burnInOnPetHidden();
   clearTimeout(desktopPetTimer);
   desktopPetTimer = null;
   desktopPet?.hide();
@@ -853,6 +877,8 @@ function showDesktopPet() {
   const pet = createDesktopPet();
   maybeSendCatMode(pet);
   pet.showInactive();
+  // A fresh visible stretch: (re)arm burn-in protection from this moment.
+  burnInOnPetShown();
 }
 
 function scheduleDesktopPet() {
@@ -874,6 +900,9 @@ function moveDesktopPetTo(point = {}) {
   desktopPetPositionSaveTimer = setTimeout(() => {
     settings.set({ desktopPetPosition: position });
   }, 350);
+  // The Doctor is actively holding her — that counts as interaction.
+  burnInNoteInteraction();
+  burnInNoteManipulation();
   return position;
 }
 
@@ -912,6 +941,9 @@ function setDesktopPetScale(scale) {
     pendingDesktopPetScalePosition = null;
     settings.set(patch);
   }, 250);
+  // Scroll-scaling her is the Doctor's hand on her too.
+  burnInNoteInteraction();
+  burnInNoteManipulation();
 }
 
 // Scroll over the pet: factor > 1 grows, < 1 shrinks. Resizes live; the scale
@@ -921,6 +953,334 @@ function scaleDesktopPetBy(factor) {
   if (!Number.isFinite(f) || f <= 0) return desktopPetScale();
   setDesktopPetScale(desktopPetScale() * f);
   return desktopPetScale();
+}
+
+// ============================================================
+//  Burn-in protection (OLED) — tray: 防烧屏保护.
+//  "corner": every DESKTOP_PET_BURN_IN_MS (30 min) she hops to the next of
+//  the four screen corners with a short fade so the jump doesn't tear.
+//  "idle-hide": after the same period without user interaction she fades out
+//  and hides; the cursor coming near her old spot wakes her again (a small
+//  invisible sensor region stays where she was).
+// ============================================================
+function burnInMode() {
+  return settings.get("desktopPetBurnIn") || "off";
+}
+
+// Dev tracer — enabled with PRTS_BURN_IN_DEBUG=1; writes to the userData
+// folder so a running pet can be diagnosed without touching the window.
+function burnInDebug(...args) {
+  if (!process.env.PRTS_BURN_IN_DEBUG) return;
+  try {
+    fs.appendFileSync(
+      path.join(app.getPath("userData"), "burn-in-debug.log"),
+      `[${new Date().toISOString()}] ${args.join(" ")}\n`
+    );
+  } catch {
+    /* never fatal */
+  }
+}
+
+// True at a moment when a burn-in action may act: enabled, pet feature on,
+// pet window alive and visible, and she wasn't parked by idle-hide herself.
+function burnInActive() {
+  return (
+    burnInMode() !== "off" &&
+    settings.get("desktopPet") !== false &&
+    desktopPet &&
+    !desktopPet.isDestroyed() &&
+    desktopPet.isVisible() &&
+    !burnInHiddenByTimer
+  );
+}
+
+function burnInStopVisibleTimer() {
+  clearTimeout(burnInVisibleTimer);
+  burnInVisibleTimer = null;
+}
+
+function burnInStopWakePoll() {
+  clearInterval(burnInWakeTimer);
+  burnInWakeTimer = null;
+}
+
+// Park the whole engine (chat opened, feature turned off, window closed).
+// The pet must never re-show over the popover, so the wake poll dies too and
+// any half-finished fade is snapped back to full opacity.
+function burnInStopAll() {
+  burnInStopVisibleTimer();
+  burnInStopWakePoll();
+  clearInterval(burnInFadeTimer);
+  burnInFadeTimer = null;
+  if (desktopPet && !desktopPet.isDestroyed()) {
+    desktopPet.setOpacity(1);
+  }
+}
+
+// A user interaction (drag, scroll-scale, summon) — restarts the idle clock.
+function burnInNoteInteraction() {
+  burnInLastInteractAt = Date.now();
+  if (burnInMode() === "idle-hide") burnInRestartIdleDeadline();
+}
+
+// A physical manipulation of the window (drag / scroll-scale). The corner hop
+// must not fire while the Doctor is actually holding her; plain summons do not
+// count, so the 30-minute corner cadence survives re-shows.
+function burnInNoteManipulation() {
+  burnInLastManipAt = Date.now();
+}
+
+// Fade animator dedicated to the pet window. The popover flows share a single
+// global windowFadeTimer, so a burn-in fade must not ride on it — opening the
+// chat mid-fade would otherwise strand her at a partial opacity.
+function burnInFade(win, from, to, onDone) {
+  clearInterval(burnInFadeTimer);
+  burnInFadeTimer = null;
+  if (!win || win.isDestroyed()) {
+    onDone?.();
+    return;
+  }
+  win.setOpacity(from);
+  const startedAt = Date.now();
+  burnInFadeTimer = setInterval(() => {
+    if (!win || win.isDestroyed()) {
+      clearInterval(burnInFadeTimer);
+      burnInFadeTimer = null;
+      onDone?.();
+      return;
+    }
+    const progress = Math.min(1, (Date.now() - startedAt) / DESKTOP_PET_BURN_IN_FADE_MS);
+    win.setOpacity(from + (to - from) * progress);
+    if (progress >= 1) {
+      clearInterval(burnInFadeTimer);
+      burnInFadeTimer = null;
+      onDone?.();
+    }
+  }, 16);
+}
+
+function burnInScheduleVisible(delay, fn) {
+  clearTimeout(burnInVisibleTimer);
+  burnInVisibleTimer = setTimeout(() => {
+    burnInVisibleTimer = null;
+    fn();
+  }, delay);
+}
+
+// ---- "corner": hop to the next of the four screen corners -----------------
+function burnInCornerPoints(display = screen.getPrimaryDisplay()) {
+  const work = display.workArea;
+  const size = desktopPetSize();
+  const m = DESKTOP_PET_BURN_IN_MARGIN;
+  return [
+    { x: work.x + m, y: work.y + m }, // top-left
+    { x: work.x + work.width - size.width - m, y: work.y + m }, // top-right
+    { x: work.x + work.width - size.width - m, y: work.y + work.height - size.height - m }, // bottom-right
+    { x: work.x + m, y: work.y + work.height - size.height - m } // bottom-left
+  ];
+}
+
+function burnInNearestCornerIndex(bounds) {
+  const cx = bounds.x + bounds.width / 2;
+  const cy = bounds.y + bounds.height / 2;
+  let best = 0;
+  let bestD = Infinity;
+  burnInCornerPoints(screen.getDisplayMatching(bounds)).forEach((c, i) => {
+    const d = Math.hypot(c.x + bounds.width / 2 - cx, c.y + bounds.height / 2 - cy);
+    if (d < bestD) {
+      bestD = d;
+      best = i;
+    }
+  });
+  return best;
+}
+
+function burnInCornerTick() {
+  if (!burnInActive() || burnInMode() !== "corner") return;
+  // The Doctor may still be holding her — don't yank the window mid-drag.
+  // Wait a quiet minute, then retry the hop.
+  if (burnInLastManipAt && Date.now() - burnInLastManipAt < 10 * 1000) {
+    burnInScheduleVisible(60 * 1000, burnInCornerTick);
+    return;
+  }
+  const win = desktopPet;
+  const from = win.getBounds();
+  const points = burnInCornerPoints(screen.getDisplayMatching(from));
+  const next = points[(burnInNearestCornerIndex(from) + 1) % points.length];
+  // Fade out → land on the next corner → fade back in → re-arm the clock.
+  burnInFade(win, 1, 0, () => {
+    if (!burnInActive() || burnInMode() !== "corner") return;
+    const position = clampDesktopPetPosition(next);
+    win.setBounds({ ...position, ...desktopPetSize() }, false);
+    // Persist her spot so a restart resumes from the corner she reached.
+    clearTimeout(desktopPetPositionSaveTimer);
+    desktopPetPositionSaveTimer = setTimeout(() => {
+      settings.set({ desktopPetPosition: position });
+    }, 350);
+    burnInFade(win, 0, 1, () => {
+      if (burnInActive() && burnInMode() === "corner") {
+        burnInScheduleVisible(DESKTOP_PET_BURN_IN_MS, burnInCornerTick);
+      }
+    });
+  });
+}
+
+// ---- "idle-hide": hide after idle, cursor near her old spot wakes her -----
+function burnInRestartIdleDeadline() {
+  if (burnInHiddenByTimer) return;
+  if (burnInMode() !== "idle-hide") {
+    burnInStopVisibleTimer();
+    return;
+  }
+  // Before any interaction the clock is 0 — start from a full interval then.
+  const last = burnInLastInteractAt || Date.now();
+  const elapsed = Date.now() - last;
+  const remain = Math.max(0, DESKTOP_PET_BURN_IN_MS - elapsed);
+  burnInScheduleVisible(remain, burnInIdleHideTick);
+}
+
+function burnInIdleHideTick() {
+  burnInDebug("idleHideTick fire");
+  if (!burnInActive() || burnInMode() !== "idle-hide") {
+    burnInDebug("idleHideTick skipped", JSON.stringify({ active: burnInActive(), mode: burnInMode() }));
+    return;
+  }
+  const win = desktopPet;
+  // Remember where she stood — that padded rect is the invisible sensor zone.
+  burnInHome = win.getBounds();
+  burnInHiddenByTimer = true;
+  const cursor = screen.getCursorScreenPoint();
+  burnInCursorWasIn = burnInCursorInHomeRect(cursor.x, cursor.y);
+  burnInDebug("hiding", JSON.stringify({ home: burnInHome, cursor: { x: cursor.x, y: cursor.y }, cursorWasIn: burnInCursorWasIn }));
+  burnInStopVisibleTimer();
+  burnInFade(win, 1, 0, () => {
+    if (win && !win.isDestroyed()) {
+      win.hide();
+      win.setOpacity(1);
+    }
+    if (burnInHiddenByTimer && burnInMode() === "idle-hide") {
+      burnInStartWakePoll();
+      burnInDebug("wake poll started");
+    } else {
+      burnInDebug("fade done, poll NOT started", JSON.stringify({ hiddenByTimer: burnInHiddenByTimer, mode: burnInMode() }));
+    }
+  });
+}
+
+function burnInCursorInHomeRect(x, y) {
+  if (!burnInHome) return false;
+  const pad = DESKTOP_PET_BURN_IN_WAKE_PAD;
+  return (
+    x >= burnInHome.x - pad &&
+    x <= burnInHome.x + burnInHome.width + pad &&
+    y >= burnInHome.y - pad &&
+    y <= burnInHome.y + burnInHome.height + pad
+  );
+}
+
+function burnInStartWakePoll() {
+  if (burnInWakeTimer) return;
+  burnInWakeTimer = setInterval(burnInWakePoll, DESKTOP_PET_BURN_IN_POLL_MS);
+}
+
+function burnInWakePoll() {
+  try {
+    if (burnInMode() !== "idle-hide" || !burnInHiddenByTimer) {
+      burnInDebug("wake poll self-stop", JSON.stringify({ mode: burnInMode(), hiddenByTimer: burnInHiddenByTimer }));
+      burnInStopWakePoll();
+      return;
+    }
+    if (!desktopPet || desktopPet.isDestroyed()) {
+      burnInDebug("wake poll stop, pet gone");
+      burnInStopWakePoll();
+      return;
+    }
+    const cursor = screen.getCursorScreenPoint();
+    const inside = burnInCursorInHomeRect(cursor.x, cursor.y);
+    // Edge-triggered: only a cursor *entering* the sensor zone wakes her, so a
+    // cursor parked on her spot after the hide doesn't instantly bounce her back.
+    if (inside && !burnInCursorWasIn) {
+      burnInDebug("wake trigger", JSON.stringify({ cursor: { x: cursor.x, y: cursor.y }, home: burnInHome }));
+      burnInStopWakePoll();
+      burnInHiddenByTimer = false;
+      const win = desktopPet;
+      if (!win.isVisible()) {
+        win.setOpacity(0);
+        win.showInactive();
+      }
+      burnInNoteInteraction();
+      burnInFade(win, 0, 1, () => burnInSync());
+    }
+    if (inside !== burnInCursorWasIn) {
+      burnInDebug("cursor region", inside ? "entered" : "left");
+    }
+    burnInCursorWasIn = inside;
+  } catch (error) {
+    burnInDebug("wake poll ERROR", error && error.message ? error.message : String(error));
+  }
+}
+
+// The pet became visible again through a normal path (idle timer, tray
+// "立即显示桌宠", chat collapse, hover wake) — resume the engine duties.
+function burnInOnPetShown() {
+  burnInDebug("pet shown (engine resume)");
+  burnInHiddenByTimer = false;
+  burnInStopWakePoll();
+  burnInNoteInteraction();
+  burnInSync();
+}
+
+// The pet was hidden by a normal path (chat opened, feature turned off).
+function burnInOnPetHidden() {
+  burnInDebug("pet hidden (engine parked)");
+  burnInHiddenByTimer = false;
+  burnInStopAll();
+}
+
+// Re-evaluate what the engine should do right now (shown/hidden/toggled).
+// Timers are only ever armed while the pet is up: every hide path stops them
+// (burnInOnPetHidden / burnInIdleHideTick), and the ticks themselves re-check
+// burnInActive() before acting.
+function burnInSync() {
+  burnInStopVisibleTimer();
+  if (burnInMode() === "off" || settings.get("desktopPet") === false) return;
+  if (!desktopPet || desktopPet.isDestroyed() || burnInHiddenByTimer) return;
+  if (burnInMode() === "corner") {
+    burnInScheduleVisible(DESKTOP_PET_BURN_IN_MS, burnInCornerTick);
+  } else if (burnInMode() === "idle-hide") {
+    burnInRestartIdleDeadline();
+  }
+}
+
+function setDesktopPetBurnIn(mode) {
+  const next = mode === "corner" || mode === "idle-hide" ? mode : "off";
+  settings.set({ desktopPetBurnIn: next });
+  if (next === "off") {
+    // Turning protection off should bring a parked pet straight back, not
+    // leave her hidden behind an invisible sensor zone.
+    if (burnInHiddenByTimer && desktopPet && !desktopPet.isDestroyed()) {
+      burnInHiddenByTimer = false;
+      burnInStopWakePoll();
+      const win = desktopPet;
+      win.setOpacity(1);
+      if (!win.isVisible()) win.showInactive();
+    }
+    burnInOnPetHidden();
+    return;
+  }
+  // She was parked by idle-hide: switching protection on (or to corner mode)
+  // brings her straight back so the Doctor isn't left staring at a sensor zone.
+  if (burnInHiddenByTimer) {
+    burnInHiddenByTimer = false;
+    burnInStopWakePoll();
+    const win = desktopPet;
+    if (win && !win.isDestroyed()) {
+      win.setOpacity(0);
+      win.showInactive();
+      burnInFade(win, 0, 1, null);
+    }
+  }
+  burnInSync();
 }
 
 function openChatFromDesktopPet() {
@@ -1003,6 +1363,7 @@ function collapsePopoverToDesktopPet() {
     const pet = createDesktopPet();
     maybeSendCatMode(pet);
     pet.showInactive();
+    burnInOnPetShown();
     return;
   }
   // She returns to where she stood before the chat opened (her saved spot) —
@@ -1015,6 +1376,7 @@ function collapsePopoverToDesktopPet() {
     popover.setOpacity(1);
     maybeSendCatMode(pet);
     pet.showInactive();
+    burnInOnPetShown();
   });
 }
 
@@ -1112,6 +1474,11 @@ const MENU_TEXT = {
     desktopPetSize: "桌宠尺寸",
     desktopPetPinned: "固定在前台",
     desktopPetClickThrough: "鼠标穿透",
+    desktopPetBurnIn: "防烧屏保护",
+    burnInOff: "关闭",
+    burnInCorner: "每 30 分钟移到另一角（四角轮换）",
+    burnInIdleHide: "空闲 30 分钟后隐藏 · 鼠标靠近现身",
+    burnInHint: "保护 OLED 屏幕：轮换四角或定时隐藏，避免桌宠图案烧屏",
     autoLaunch: "开机自启动",
     dshSection: "DeepSeek Harness",
     dshStatusRunning: (pid) => `状态：运行中${pid || ""}`,
@@ -1195,6 +1562,11 @@ const MENU_TEXT = {
     desktopPetSize: "Desktop pet size",
     desktopPetPinned: "Pin to foreground",
     desktopPetClickThrough: "Mouse click-through",
+    desktopPetBurnIn: "Burn-in protection",
+    burnInOff: "Off",
+    burnInCorner: "Hop to another corner every 30 min",
+    burnInIdleHide: "Hide after 30 min idle · mouse near to wake",
+    burnInHint: "Protect OLED screens: cycle corners or hide periodically so the pet sprite can't burn in",
     autoLaunch: "Launch at login",
     dshSection: "DeepSeek Harness",
     dshStatusRunning: (pid) => `Status: running${pid || ""}`,
@@ -1913,6 +2285,32 @@ function buildContextMenu() {
       checked: all.desktopPetClickThrough === true,
       click: (item) => setDesktopPetClickThrough(item.checked)
     },
+    {
+      label: mt("desktopPetBurnIn"),
+      enabled: all.desktopPet !== false,
+      submenu: [
+        {
+          label: mt("burnInOff"),
+          type: "radio",
+          checked: (all.desktopPetBurnIn || "off") === "off",
+          click: () => setDesktopPetBurnIn("off")
+        },
+        {
+          label: mt("burnInCorner"),
+          type: "radio",
+          checked: all.desktopPetBurnIn === "corner",
+          click: () => setDesktopPetBurnIn("corner")
+        },
+        {
+          label: mt("burnInIdleHide"),
+          type: "radio",
+          checked: all.desktopPetBurnIn === "idle-hide",
+          click: () => setDesktopPetBurnIn("idle-hide")
+        },
+        { type: "separator" },
+        { label: mt("burnInHint"), enabled: false }
+      ]
+    },
     { type: "separator" },
     {
       label: mt("dshSection"),
@@ -2320,6 +2718,15 @@ app.whenReady().then(() => {
     // the tray menu while the pet is already on screen.
     if (patch && "desktopPetClickThrough" in patch && desktopPet && !desktopPet.isDestroyed()) {
       desktopPet.webContents.send("desktop-pet:click-through-state", settings.get("desktopPetClickThrough") === true);
+    }
+    // Burn-in protection follows setting changes from anywhere (menu, future
+    // settings UI, or hand-edited settings.json).
+    if (patch && ("desktopPetBurnIn" in patch || "desktopPet" in patch)) {
+      if (settings.get("desktopPetBurnIn") !== "off" && settings.get("desktopPet") !== false) {
+        burnInSync();
+      } else {
+        burnInOnPetHidden();
+      }
     }
   });
 
