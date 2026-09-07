@@ -102,10 +102,59 @@ const doFetch =
     : (input, init) => require("electron").net.fetch(input, init);
 
 /**
+ * Try to locate a real `dsh` CLI on this machine beyond the well-known dirs:
+ *   - `npm root -g` (npm global installs);
+ *   - resolving `dsh` from PATH and deriving its package dir (npm .bin shims
+ *     live inside node_modules/.bin, the package one level up).
+ * Windows cannot spawn a bare `dsh` (.cmd shim), so returning the absolute
+ * bin.js (run through node) is what makes startup actually work.
+ */
+function discoverDshBin() {
+  const { spawnSync } = require("node:child_process");
+  const existing = (p) => (p && fs.existsSync(p) ? p : undefined);
+  try {
+    const npmRoot = spawnSync(
+      process.platform === "win32" ? "npm.cmd" : "npm",
+      ["root", "-g"],
+      { encoding: "utf8", timeout: 8000, windowsHide: true }
+    );
+    if (!npmRoot.error && npmRoot.status === 0) {
+      const root = String(npmRoot.stdout || "").trim();
+      if (root) {
+        const hit = existing(path.join(root, "@deepseek-ai", "dsh", "lib", "bin.js"));
+        if (hit) return hit;
+      }
+    }
+  } catch {
+    /* npm unavailable — keep probing */
+  }
+  try {
+    const cmd = process.platform === "win32" ? "where.exe" : "which";
+    const out = spawnSync(cmd, ["dsh"], { encoding: "utf8", timeout: 8000, windowsHide: true });
+    if (!out.error && out.status === 0) {
+      const first = String(out.stdout || "").split(/\r?\n/).map((s) => s.trim()).find(Boolean);
+      if (first) {
+        const shimDir = path.dirname(first); // .../node_modules/.bin
+        const pkgDir = path.join(shimDir, "..");
+        const hit = existing(path.join(pkgDir, "@deepseek-ai", "dsh", "lib", "bin.js"));
+        if (hit) return hit;
+        // npx layout: .../_npx/<hash>/node_modules/.bin → package under node_modules
+        const hit2 = existing(path.join(path.dirname(pkgDir), "..", "@deepseek-ai", "dsh", "lib", "bin.js"));
+        if (hit2) return hit2;
+      }
+    }
+  } catch {
+    /* command not found */
+  }
+  return undefined;
+}
+
+/**
  * Resolve how to launch the dsh CLI, platform-aware:
  *   1. explicit settings/env overrides (dshNodePath + dshBinPath) win;
  *   2. known install locations (Windows legacy install, npm global dirs);
- *   3. the `dsh` command on PATH (npm global bin — the mac/Linux default).
+ *   3. dynamic discovery (npm root -g / `dsh` on PATH);
+ *   4. the `dsh` command on PATH as the last resort (mac/Linux default).
  * Returns { cmd, args } ready for spawn().
  */
 function launchConfig(settings) {
@@ -126,12 +175,15 @@ function launchConfig(settings) {
     candidates.push("/usr/local/lib/node_modules/@deepseek-ai/dsh/lib/bin.js");
     candidates.push(path.join(process.env.HOME || "", ".npm-global", "lib", "node_modules", "@deepseek-ai", "dsh", "lib", "bin.js"));
   }
+  const discovered = discoverDshBin();
+  if (discovered) candidates.push(discovered);
   for (const candidate of candidates) {
     if (candidate && fs.existsSync(candidate)) {
       return { cmd: nodePath, args: [candidate, ...extraArgs] };
     }
   }
-  // Fall back to the `dsh` command on PATH (npm global bin).
+  // Fall back to the `dsh` command on PATH (npm global bin — works on
+  // mac/Linux where it is a real executable, not a .cmd shim).
   return { cmd: "dsh", args: [...extraArgs] };
 }
 
@@ -189,27 +241,48 @@ async function start({ logFile, settings } = {}) {
       /* fall back to ignore */
     }
   }
-  try {
-    child = spawn(cfg.cmd, cfg.args, {
-      detached: true,
-      windowsHide: true,
-      stdio
-    });
-    child.unref();
-    const pid = child.pid;
-    if (stdioStream !== null) fs.closeSync(stdioStream);
-    const up = await waitForUp();
-    if (!up) {
-      return {
-        ok: false,
-        error: `DSH 服务启动超时（${DSH_START_WAIT_MS / 1000}s 内未监听 ${DSH_PORT} 端口）`,
-        pid
-      };
+  // spawn() reports ENOENT and friends *asynchronously* through the child's
+  // 'error' event — without a listener that becomes an uncaught exception in
+  // the main process. Attach one before anything else and fold the failure
+  // into a clean { ok: false, error } result instead of crashing.
+  const spawned = spawn(cfg.cmd, cfg.args, {
+    detached: true,
+    windowsHide: true,
+    stdio
+  });
+  let spawnError = null;
+  spawned.once("error", (error) => {
+    spawnError = error;
+  });
+  spawned.unref();
+  child = spawned;
+  const pid = spawned.pid;
+  if (stdioStream !== null) {
+    try {
+      fs.closeSync(stdioStream);
+    } catch {
+      /* ignore */
     }
-    return { ok: true, already: false, pid };
-  } catch (error) {
-    return { ok: false, error: error.message, pid: child && child.pid };
   }
+  const deadline = Date.now() + DSH_START_WAIT_MS;
+  while (Date.now() < deadline) {
+    if (spawnError) {
+      child = null;
+      const code = spawnError.code ? ` (${spawnError.code})` : "";
+      const detail = (spawnError.message || String(spawnError)).slice(0, 160);
+      const hint =
+        "未找到可用的 dsh CLI。请先安装 DeepSeek Harness（托盘 → DSH 控制台可触发安装），" +
+        "或在 DSH 控制台设置 node 与 dsh 的完整路径（settings.json 的 dshNodePath / dshBinPath）后重试。";
+      return { ok: false, error: `无法启动 dsh${code}：${detail}。${hint}`, pid: null };
+    }
+    if (await isRunning(300)) return { ok: true, already: false, pid };
+    await new Promise((resolve) => setTimeout(resolve, 400));
+  }
+  return {
+    ok: false,
+    error: `DSH 服务启动超时（${DSH_START_WAIT_MS / 1000}s 内未监听 ${DSH_PORT} 端口）`,
+    pid: child && child.pid
+  };
 }
 
 /** Find the PID listening on 127.0.0.1:<port> (Windows netstat). Exported for tests. */
