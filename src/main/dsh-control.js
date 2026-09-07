@@ -17,6 +17,7 @@
 const { spawn, execFile } = require("node:child_process");
 const net = require("node:net");
 const fs = require("node:fs");
+const path = require("node:path");
 
 const DSH_PORT = 3080;
 const DSH_BASE = `http://127.0.0.1:${DSH_PORT}`;
