@@ -17,12 +17,82 @@
 const { spawn, execFile } = require("node:child_process");
 const net = require("node:net");
 const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
+const { createHash, createHmac } = require("node:crypto");
 
 const DSH_PORT = 3080;
 const DSH_BASE = `http://127.0.0.1:${DSH_PORT}`;
 const DSH_START_WAIT_MS = 15000;
 const DSH_RPC_TIMEOUT_MS = 15000;
+// DSH web (0.1.x) guards /api behind a browser-session cookie: the server
+// signs cookies with a per-home secret persisted at <DSH_HOME>/.credentials.yaml
+// under client-connection/browser-session. The pet re-creates the same cookie
+// (name dsh-auth-<sha256(authority)>, value v1.<payload>.<hmac>) so its DSH
+// console works whether the service was started by PRTS or by hand.
+const DSH_AUTH_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+
+function dshHomeDir() {
+  return process.env.DSH_HOME || path.join(os.homedir(), ".dsh");
+}
+
+// Tiny indentation-tolerant reader for the browser-session signing secret.
+let secretCache = { file: null, mtimeMs: -1, secret: undefined };
+function browserSessionSecret() {
+  const file = path.join(dshHomeDir(), ".credentials.yaml");
+  try {
+    const stat = fs.statSync(file);
+    if (secretCache.file === file && secretCache.mtimeMs === stat.mtimeMs) {
+      return secretCache.secret;
+    }
+    const raw = fs.readFileSync(file, "utf8");
+    let secret;
+    const lines = raw.split(/\r?\n/);
+    for (let i = 0; i < lines.length; i += 1) {
+      if (!/^\s+client-connection\/browser-session:/.test(lines[i])) continue;
+      for (let j = i + 1; j < Math.min(lines.length, i + 12); j += 1) {
+        const m = lines[j].match(/^\s+secret:\s*"?([A-Za-z0-9_-]+)"?\s*$/);
+        if (m) {
+          secret = m[1];
+          break;
+        }
+        if (/^\S/.test(lines[j])) break;
+      }
+      break;
+    }
+    secretCache = { file, mtimeMs: stat.mtimeMs, secret };
+    return secret;
+  } catch {
+    secretCache = { file, mtimeMs: -1, secret: undefined };
+    return undefined;
+  }
+}
+
+function encodeBase64Url(buffer) {
+  return buffer.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+/** Build the authority-bound signed cookie the DSH web server expects. */
+function browserAuthCookie(secret) {
+  const authority = `127.0.0.1:${DSH_PORT}`;
+  const name = "dsh-auth-" + encodeBase64Url(createHash("sha256").update(authority).digest());
+  const key = Buffer.from(secret, "base64url");
+  const payload = {
+    version: 1,
+    authority,
+    issuedAt: Date.now(),
+    expiresAt: Date.now() + DSH_AUTH_MAX_AGE_MS
+  };
+  const body = encodeBase64Url(Buffer.from(JSON.stringify(payload), "utf8"));
+  const signature = encodeBase64Url(createHmac("sha256", key).update(body).digest());
+  return `${name}=v1.${body}.${signature}`;
+}
+
+/** Cookie header for the DSH web /api browser-trust fence, when available. */
+function authCookieHeader() {
+  const secret = browserSessionSecret();
+  return secret ? browserAuthCookie(secret) : undefined;
+}
 
 // Electron main exposes globalThis.fetch since Electron 25; net.fetch exists in
 // every supported Electron. Prefer the WHATWG global, fall back to net.fetch.
@@ -182,8 +252,13 @@ async function stop() {
   return { ok: !up, stopped: !up, pid };
 }
 
-/** One RPC call against the DSH web API. Returns the `result` slot. */
-async function rpc(method, payload, timeoutMs = DSH_RPC_TIMEOUT_MS) {
+/** One RPC call against the DSH web API. Returns the `result` slot.
+ *  `wireArgs` is the exact args object placed under `payload.args` — the
+ *  current DSH validates argument *names* against each endpoint's single
+ *  parameter (session.list wants `{ _request: {} }`, most others `{ request:
+ *  {...} }`), so callers assemble it per method.
+ */
+async function rpc(method, wireArgs, timeoutMs = DSH_RPC_TIMEOUT_MS) {
   const rpcId =
     typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
       ? crypto.randomUUID()
@@ -191,18 +266,56 @@ async function rpc(method, payload, timeoutMs = DSH_RPC_TIMEOUT_MS) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await doFetch(`${DSH_BASE}/api/${method}`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        type: "client-request",
-        rpcId,
-        method,
-        payload
-      }),
-      signal: controller.signal
-    });
-    const body = await response.json();
+    const headers = { "content-type": "application/json" };
+    const cookie = authCookieHeader();
+    if (cookie) headers.cookie = cookie;
+    // Current DSH routes /api/<namespace>/<method> (session.list → session/list)
+    // and expects the envelope's `method` to carry the same slash form. Older
+    // builds used the dotted method directly; try the slash form first and only
+    // fall back on a genuine 404 (nothing was dispatched).
+    const dotted = method.includes(".") ? method : undefined;
+    const slashRoute = method.replace(/\./g, "/");
+    const routes = dotted && dotted !== slashRoute ? [slashRoute, dotted] : [slashRoute];
+    let response;
+    let wireMethod = slashRoute;
+    for (let i = 0; i < routes.length; i += 1) {
+      wireMethod = routes[i];
+      response = await doFetch(`${DSH_BASE}/api/${wireMethod}`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          type: "client-request",
+          rpcId,
+          method: wireMethod,
+          payload: { args: wireArgs && typeof wireArgs === "object" ? wireArgs : {} }
+        }),
+        signal: controller.signal
+      });
+      if (response.ok || response.status !== 404 || routes.length === 1) break;
+    }
+    // The web service answers with a plain-text 401 ("unauthorized") when the
+    // browser-session cookie is missing/invalid — never try to JSON-parse it.
+    if (!response.ok) {
+      let detail = "";
+      try {
+        detail = String(await response.text()).slice(0, 200);
+      } catch {
+        /* ignore */
+      }
+      let hint = "";
+      if (response.status === 401) {
+        hint = cookie
+          ? "（浏览器会话凭据无效或已过期，请重新打开一次 DSH 面板）"
+          : "（未找到 DSH 浏览器会话凭据，请先打开一次 DSH 面板完成配对）";
+      }
+      throw new Error(`DSH 请求失败（${method} HTTP ${response.status}${detail ? `: ${detail}` : ""}）${hint}`);
+    }
+    let body;
+    try {
+      body = await response.json();
+    } catch (error) {
+      throw new Error(`DSH 响应异常（${method}）：${error && error.message ? error.message : String(error)}`);
+    }
     if (
       !body ||
       body.type !== "server-response" ||
@@ -217,17 +330,17 @@ async function rpc(method, payload, timeoutMs = DSH_RPC_TIMEOUT_MS) {
   }
 }
 
-/** host.describe — cheap read-only health/identity probe. */
+/** host.describe — cheap read-only health/identity probe (best effort). */
 function describe() {
-  return rpc("host.describe", {});
+  return rpc("host.describe", { _request: {} });
 }
 
 /** session.list — { items: SessionSummary[] } (running flags, titles…). */
 function listSessions() {
-  return rpc("session.list", {});
+  return rpc("session.list", { _request: {} });
 }
 
-/** session.prompt — mode 'queue' appends; 'steer' interrupts and redirects. */
+/** session.prompt — mode 'steer' interrupts and redirects; other modes enqueue. */
 function send(sessionId, text, mode) {
   let clientTimeZone;
   try {
@@ -236,16 +349,18 @@ function send(sessionId, text, mode) {
     clientTimeZone = undefined;
   }
   return rpc("session.prompt", {
-    sessionId,
-    mode,
-    content: [{ type: "text", text }],
-    ...(clientTimeZone ? { clientTimeZone } : {})
+    request: {
+      sessionId,
+      mode: mode === "steer" ? "steer" : "queue",
+      content: [{ type: "text", text }],
+      ...(clientTimeZone ? { clientTimeZone } : {})
+    }
   });
 }
 
 /** session.cancel — stop the active turn, keep the pending queue. */
 function cancel(sessionId) {
-  return rpc("session.cancel", { sessionId });
+  return rpc("session.cancel", { request: { sessionId } });
 }
 
 /** Aggregated status for the tray/panel: running + session count + last error. */
