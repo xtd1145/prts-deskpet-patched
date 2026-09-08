@@ -146,6 +146,28 @@ function discoverDshBin() {
   } catch {
     /* command not found */
   }
+  // npx / npm exec cache installs: <npm-cache>/_npx/<hash>/node_modules/@deepseek-ai/dsh/lib/bin.js.
+  // `npx @deepseek-ai/dsh web` — the way DeepSeek Harness is commonly launched —
+  // never touches npm global dirs, so this scan is what finds it.
+  const npxRoots = [];
+  if (process.platform === "win32") {
+    if (process.env.LOCALAPPDATA) npxRoots.push(path.join(process.env.LOCALAPPDATA, "npm-cache", "_npx"));
+    if (process.env.APPDATA) npxRoots.push(path.join(process.env.APPDATA, "npm-cache", "_npx"));
+  } else {
+    npxRoots.push(path.join(os.homedir(), ".npm", "_npx"));
+  }
+  for (const root of npxRoots) {
+    try {
+      for (const entry of fs.readdirSync(root)) {
+        const hit = existing(
+          path.join(root, entry, "node_modules", "@deepseek-ai", "dsh", "lib", "bin.js")
+        );
+        if (hit) return hit;
+      }
+    } catch {
+      /* cache dir missing — keep looking */
+    }
+  }
   return undefined;
 }
 
