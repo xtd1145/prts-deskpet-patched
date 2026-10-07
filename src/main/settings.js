@@ -16,12 +16,16 @@ const DEFAULTS = Object.freeze({
   priestessBaseUrl: "http://127.0.0.1:4000",
   priestessApiKey: "",
   priestessModel: "",
-  // Official DeepSeek API backend (https://api.deepseek.com) — the same
-  // built-in HTTP path as Priestess, but the base URL is fixed to DeepSeek's
-  // own endpoint so the Doctor only needs an API key. The key and optional
-  // model live ONLY in this local settings.json and are sent only to
-  // api.deepseek.com.
+  // DeepSeek backend — an OpenAI-compatible chat backend for DeepSeek models.
+  // By default it talks to the official API (https://api.deepseek.com); set
+  // deepseekBaseUrl to any other OpenAI-compatible gateway that serves DeepSeek
+  // models (a relay/proxy such as one-api / new-api, SiliconFlow, OpenRouter,
+  // 火山方舟, or a local Ollama / LM Studio / vLLM) and the same backend reaches
+  // them instead. An empty base URL means "official endpoint". The key, the
+  // address and the optional model live ONLY in this local settings.json and
+  // are sent only to the address configured here.
   deepseekEnabled: false,
+  deepseekBaseUrl: "",
   deepseekApiKey: "",
   deepseekModel: "",
   chatCwd: "",

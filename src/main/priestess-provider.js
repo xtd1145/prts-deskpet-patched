@@ -13,21 +13,41 @@
 
 const { net } = require("electron");
 
-// Official DeepSeek API endpoint (OpenAI-compatible). Fixed on purpose — the
-// generic Priestess backend is there for anyone who wants a custom server.
+// Official DeepSeek API endpoint (OpenAI-compatible) — the default for the
+// DeepSeek backend. The Doctor can point that backend at any other
+// OpenAI-compatible gateway instead (see resolveDeepseekBaseUrl); this constant
+// stays as the fallback and as the "official" label in the settings window.
 const DEEPSEEK_API_BASE_URL = "https://api.deepseek.com";
 
-// Accept base URLs with or without /v1 (or a full /chat/completions path).
-// A trailing /anthropic (the Anthropic-format base DeepSeek documents for CLIs)
-// is OpenAI-incompatible — the gateway serves the OpenAI surface from the
-// root, so normalize it away before appending /v1/chat/completions.
-function chatCompletionsUrl(baseUrl) {
+// The DeepSeek backend accepts a custom API address: a relay/proxy (one-api,
+// new-api, …), a cloud vendor (SiliconFlow, OpenRouter, 火山方舟, …) or a local
+// server (Ollama, LM Studio, vLLM) can all serve DeepSeek models through the
+// same OpenAI surface. An empty setting keeps the official endpoint.
+function resolveDeepseekBaseUrl(baseUrl) {
+  const value = String(baseUrl || "").trim().replace(/\/+$/, "");
+  return value || DEEPSEEK_API_BASE_URL;
+}
+
+// The OpenAI "root" behind a configured base URL. Gateways differ in where
+// they put it: the official API answers both https://api.deepseek.com/v1 and
+// the bare root, OpenRouter uses /api/v1, 火山方舟 /api/v3, and most local
+// servers /v1. So: a URL that already carries a version segment (/v1, /v2,
+// /api/v3, …) or a full …/chat/completions path is used as-is, anything else
+// gets the near-universal /v1 appended. A trailing /anthropic (the
+// Anthropic-format base DeepSeek documents for CLIs) is OpenAI-incompatible —
+// the gateway serves the OpenAI surface from the root, so normalize it away.
+function apiRoot(baseUrl) {
   let base = String(baseUrl || "").trim().replace(/\/+$/, "");
   if (!base) return null;
-  if (base.endsWith("/chat/completions")) return base;
-  if (base.endsWith("/anthropic")) base = base.replace(/\/anthropic$/, "");
-  if (base.endsWith("/v1")) return `${base}/chat/completions`;
-  return `${base}/v1/chat/completions`;
+  base = base.replace(/\/chat\/completions$/, "").replace(/\/anthropic$/, "");
+  if (!base) return null;
+  if (/\/v\d+$/.test(base)) return base;
+  return `${base}/v1`;
+}
+
+function chatCompletionsUrl(baseUrl) {
+  const root = apiRoot(baseUrl);
+  return root ? `${root}/chat/completions` : null;
 }
 
 function extractDelta(payload) {
@@ -229,35 +249,57 @@ function startTurn({ baseUrl, apiKey, model, system, messages, onDelta, onDone, 
   };
 }
 
-// Probe the server's /v1/models — verifies URL + key and returns the model ids
-// so the settings page can offer them as suggestions.
+// Probe the server's model list — verifies URL + key and returns the model ids
+// so the settings page can offer them as suggestions. OpenRouter-style gateways
+// answer `${base}/v1/models` while some relays and local servers expose
+// `${base}/models` (or only strip /v1 from the root), so try both shapes.
 async function testConnection({ baseUrl, apiKey }) {
-  const base = String(baseUrl || "")
+  const root = apiRoot(baseUrl);
+  if (!root) return { ok: false, error: "no server URL" };
+  // The bare URL (version segment stripped) is the fallback for relays that
+  // answer /models at the root only.
+  const bare = String(baseUrl || "")
     .trim()
     .replace(/\/+$/, "")
     .replace(/\/chat\/completions$/, "")
-    .replace(/\/anthropic$/, "")
-    .replace(/\/v1$/, "");
-  if (!base) return { ok: false, error: "no server URL" };
-  try {
-    const res = await net.fetch(`${base}/v1/models`, {
-      headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
-      cache: "no-store",
-      // Don't let a dead host hang the settings window on its TCP timeout.
-      signal: AbortSignal.timeout(TEST_TIMEOUT_MS)
-    });
-    if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
-    const json = await res.json().catch(() => null);
-    const models = Array.isArray(json?.data)
-      ? json.data.map((m) => m?.id).filter(Boolean).slice(0, 100)
-      : [];
-    return { ok: true, models };
-  } catch (error) {
-    if (error?.name === "TimeoutError" || error?.name === "AbortError") {
-      return { ok: false, error: `连接超时（${TEST_TIMEOUT_MS / 1000} 秒）——请确认服务器地址与端口` };
+    .replace(/\/anthropic$/, "");
+  const roots = [root, bare].filter(
+    (value, index, all) => value && all.indexOf(value) === index
+  );
+  let lastError = "no server URL";
+  for (const root of roots) {
+    const modelsUrl = `${root}/models`;
+    try {
+      const res = await net.fetch(modelsUrl, {
+        headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
+        cache: "no-store",
+        // Don't let a dead host hang the settings window on its TCP timeout.
+        signal: AbortSignal.timeout(TEST_TIMEOUT_MS)
+      });
+      if (!res.ok) {
+        lastError = `HTTP ${res.status}（${modelsUrl}）`;
+        continue;
+      }
+      const json = await res.json().catch(() => null);
+      const models = Array.isArray(json?.data)
+        ? json.data.map((m) => m?.id).filter(Boolean).slice(0, 100)
+        : [];
+      return { ok: true, models, endpoint: modelsUrl };
+    } catch (error) {
+      if (error?.name === "TimeoutError" || error?.name === "AbortError") {
+        lastError = `连接超时（${TEST_TIMEOUT_MS / 1000} 秒）——请确认服务器地址与端口`;
+      } else {
+        lastError = error?.message || String(error);
+      }
     }
-    return { ok: false, error: error?.message || String(error) };
   }
+  return { ok: false, error: lastError };
 }
 
-module.exports = { startTurn, chatCompletionsUrl, testConnection, DEEPSEEK_API_BASE_URL };
+module.exports = {
+  startTurn,
+  chatCompletionsUrl,
+  testConnection,
+  resolveDeepseekBaseUrl,
+  DEEPSEEK_API_BASE_URL
+};

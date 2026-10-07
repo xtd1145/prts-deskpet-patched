@@ -1,7 +1,7 @@
 {
   "name": "claude-code-but-priestess",
-  "version": "0.8.7",
-  "description": "PRTS desktop pet — patched complete build (auto-launch, DSH control, popover mode switch, backend 404 fix, pet window behavior, pet-side toggle, userData inheritance, auto-update, feedback, mac one-click pkg, quick launch, DeepSeek backend).",
+  "version": "0.8.8",
+  "description": "PRTS desktop pet — patched complete build (auto-launch, DSH control, popover mode switch, backend 404 fix, pet window behavior, pet-side toggle, userData inheritance, auto-update, feedback, mac one-click pkg, quick launch, DeepSeek backend via the official or any custom OpenAI-compatible API).",
   "main": "src/main/main.js",
   "private": true,
   "author": "SVAH-X (original) + patched",

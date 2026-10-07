@@ -5,7 +5,7 @@
 
 本仓库包含应用完整源码（`src/`、`assets/`）+ 我们打的所有补丁（`patches/`），以及一个可直接运行的完整版便携包（见 GitHub Releases）。
 
-## 相对原版的 11 项补丁
+## 相对原版的 12 项补丁
 
 1. **开机自启动** — 托盘新增「开机自启动」开关，通过 `app.setLoginItemSettings` 写 Windows Run 键（`src/main/main.js` 的 `applyAutoLaunch`）。
 2. **DSH 控制插件** — 新增 `src/main/dsh-control.js`：管理 127.0.0.1:3080 的 DeepSeek Harness 服务（启动/停止/状态探测）+ 最小 RPC 客户端（`session.list / prompt / cancel / host.describe`）；托盘新增 "DeepSeek Harness" 区块；独立「DSH 控制台」窗口（`src/renderer/dsh-control.html/.js`）。
@@ -24,7 +24,8 @@
     ]
     ```
     （`id` 可留空自动生成；`args` 可省略；路径里反斜杠要写 `\\`）。
-11. **DeepSeek 说话后端** — 托盘「使用后端」新增 **DeepSeek** 选项：不依赖本地 CLI，直连 DeepSeek 官方 API（`https://api.deepseek.com`），只需在托盘「DeepSeek 设置…」里填一个 API Key（可选选模型 `deepseek-chat` / `deepseek-reasoner`，可「测试连接」）。人设、记忆、心情表情、技能指令全部照常工作；设置项 `deepseekEnabled / deepseekApiKey / deepseekModel` 仅存本机 `settings.json`，密钥只发送给 api.deepseek.com。
+11. **DeepSeek 说话后端** — 托盘「使用后端」新增 **DeepSeek** 选项：不依赖本地 CLI，直连 DeepSeek 官方 API（`https://api.deepseek.com`），只需在托盘「DeepSeek 设置…」里填一个 API Key（可选选模型 `deepseek-chat` / `deepseek-reasoner`，可「测试连接」）。人设、记忆、心情表情、技能指令全部照常工作；设置项 `deepseekEnabled / deepseekBaseUrl / deepseekApiKey / deepseekModel` 仅存本机 `settings.json`，密钥只发送给你在设置里填写的 API 地址。
+12. **DeepSeek 走非官方 API（自定义地址）** — 「DeepSeek 设置…」新增 **API 地址（Base URL）** 一栏：留空就是官方 `https://api.deepseek.com`，填别的即改用任意 OpenAI 兼容网关来调用 DeepSeek —— 中转 / 代理站（one-api、new-api …）、SiliconFlow、OpenRouter、火山方舟，或本机 Ollama / LM Studio / vLLM 上的 deepseek 模型。地址可写域名根、`…/v1`、`…/api/v3` 或完整 `…/v1/chat/completions`，程序会自动补全请求路径（`src/main/priestess-provider.js` 的 `apiRoot`）；「测试连接」会依次尝试 `…/v1/models` 与 `…/models` 并列出该地址的模型供下拉选择。本机服务不需要 Key 时可留空（`127.0.0.1` / `localhost` / `[::1]` 地址会被当作免 Key 的本地网关，后端照样可用）。换地址后旧配置不会丢：`deepseekBaseUrl` 为空即回到官方。
 
 ## 目录
 
@@ -53,6 +54,14 @@ package.json
 - **应用更新后重打补丁**：更新会覆盖 `app.asar`，用
   `node patches/prts-reapply-patch.js --install`
   一键重放全部补丁（需在安装目录所在机器的 node 环境执行）。
+  如果新版**已经带上了早先的补丁**（例如更新到 0.8.7 之后），只想补上最新的
+  DeepSeek 自定义 API 那一块，用 `--only=12`：它只应用该项的改动与设置页文件，
+  不会覆盖新版里其它已改进过的文件（实测与手工注入得到的 asar 完全一致）：
+  ```bash
+  node patches/prts-reapply-patch.js --only=12 --install
+  # 宽松模式：锚点找不到就跳过，能补多少补多少
+  node patches/prts-reapply-patch.js --skip-missing --install
+  ```
 
 ## DeepSeek Harness 安装（安装包内可选）
 

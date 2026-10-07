@@ -1,8 +1,11 @@
-// Settings page for the DeepSeek backend (official API). Everything here is
-// local: the config round-trips to settings.json via IPC and nowhere else.
-// The base URL is fixed to https://api.deepseek.com by the main process.
+// Settings page for the DeepSeek backend. Everything here is local: the config
+// round-trips to settings.json via IPC and nowhere else. The API address is
+// empty by default, which means the official endpoint
+// (https://api.deepseek.com); any other OpenAI-compatible gateway that serves
+// DeepSeek models can be configured instead.
 
 const enabledEl = document.getElementById("enabled");
+const baseUrlEl = document.getElementById("baseUrl");
 const apiKeyEl = document.getElementById("apiKey");
 const modelEl = document.getElementById("model");
 const modelListEl = document.getElementById("modelList");
@@ -13,15 +16,31 @@ const cancelBtn = document.getElementById("cancelBtn");
 const toggleKeyBtn = document.getElementById("toggleKey");
 const keyLinkEl = document.getElementById("keyLink");
 
+let officialBaseUrl = "https://api.deepseek.com";
+
 function setStatus(text, kind) {
   statusEl.textContent = text || "";
   statusEl.className = kind || "";
 }
 
+// A filled box that is just the official endpoint is the same as leaving it
+// empty — treat it that way so the placeholder stays the single source of truth.
+function baseUrlValue() {
+  const value = baseUrlEl.value.trim().replace(/\/+$/, "");
+  return value === officialBaseUrl ? "" : value;
+}
+
+function targetLabel() {
+  return baseUrlValue() || officialBaseUrl;
+}
+
 window.deepseekApi
   .getConfig()
   .then((cfg) => {
+    if (cfg?.officialBaseUrl) officialBaseUrl = cfg.officialBaseUrl;
     enabledEl.checked = Boolean(cfg.enabled);
+    baseUrlEl.value = cfg.baseUrl || "";
+    baseUrlEl.placeholder = `留空 = 官方 ${officialBaseUrl}`;
     apiKeyEl.value = cfg.apiKey || "";
     modelEl.value = cfg.model || "";
   })
@@ -38,10 +57,11 @@ toggleKeyBtn.addEventListener("click", () => {
 });
 
 testBtn.addEventListener("click", async () => {
-  setStatus("正在连接 DeepSeek API…");
+  setStatus(`正在连接 ${targetLabel()} …`);
   testBtn.disabled = true;
   try {
     const result = await window.deepseekApi.testConnection({
+      baseUrl: baseUrlEl.value,
       apiKey: apiKeyEl.value
     });
     if (result?.ok) {
@@ -74,6 +94,7 @@ saveBtn.addEventListener("click", async () => {
   try {
     await window.deepseekApi.setConfig({
       enabled: enabledEl.checked,
+      baseUrl: baseUrlValue(),
       apiKey: apiKeyEl.value,
       model: modelEl.value
     });

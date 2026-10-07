@@ -1,8 +1,15 @@
-// Re-apply the PRTS feature patches (auto-launch + DSH control plugin) to a
+// Re-apply the PRTS feature patches (auto-launch + DSH control plugin + …) to a
 // (possibly updated) app.asar.
-// Usage: node prts-reapply-patch.js [path-to-app.asar] [--install]
+// Usage: node prts-reapply-patch.js [path-to-app.asar] [--install] [--skip-missing] [--only=12]
 // Default asar: C:\Users\bihaojun\AppData\Local\Programs\PRTS\resources\app.asar
 // With --install: backs up the current asar (app.asar.pre-patch) and installs.
+// With --skip-missing: anchors that no longer match are skipped instead of
+//   aborting the run. Use it on an asar that ALREADY carries earlier patches
+//   (e.g. a newer release that still lacks the latest feature) so only the
+//   edits that are genuinely absent get applied.
+// With --only=12: apply just the DeepSeek custom-API feature (the newest
+//   block) to an asar that already has the older patches — the precise way to
+//   refresh a newer release without touching anything else.
 //
 // Two kinds of changes:
 //  - anchored string edits on src/main/main.js, src/main/settings.js,
@@ -23,6 +30,7 @@ const SRC_TREE = path.join(TOOLS, 'prts-full');
 const DEFAULT_ASAR = 'C:/Users/bihaojun/AppData/Local/Programs/PRTS/resources/app.asar';
 const asarPath = path.resolve(process.argv[2] || DEFAULT_ASAR);
 const install = process.argv.includes('--install');
+const skipMissing = process.argv.includes('--skip-missing');
 
 const D = fs.readFileSync(asarPath);
 const S = D.readUInt32LE(4), jsonLen = D.readUInt32LE(12);
@@ -402,9 +410,62 @@ const EDITS = [
     '    ph_no_cli: "Install Claude Code or Codex CLI first…",',
     '    ph_no_cli: "Install Claude Code / Codex CLI or enable a built-in backend first…",']
   ,
+  // ══ feature 12: DeepSeek backend via a custom (non-official) API ══
+  // Order matters: these anchors match the text feature 11 just wrote, so the
+  // pair upgrades both a fresh upstream asar and one already carrying v0.8.2.
+  ['src/main/priestess-provider.js',
+    '// Official DeepSeek API endpoint (OpenAI-compatible). Fixed on purpose — the\n// generic Priestess backend is there for anyone who wants a custom server.\nconst DEEPSEEK_API_BASE_URL = "https://api.deepseek.com";',
+    '// Official DeepSeek API endpoint (OpenAI-compatible) — the default for the\n// DeepSeek backend. The Doctor can point that backend at any other\n// OpenAI-compatible gateway instead (see resolveDeepseekBaseUrl); this constant\n// stays as the fallback and as the "official" label in the settings window.\nconst DEEPSEEK_API_BASE_URL = "https://api.deepseek.com";\n\n// The DeepSeek backend accepts a custom API address: a relay/proxy (one-api,\n// new-api, …), a cloud vendor (SiliconFlow, OpenRouter, 火山方舟, …) or a local\n// server (Ollama, LM Studio, vLLM) can all serve DeepSeek models through the\n// same OpenAI surface. An empty setting keeps the official endpoint.\nfunction resolveDeepseekBaseUrl(baseUrl) {\n  const value = String(baseUrl || "").trim().replace(/\\/+$/, "");\n  return value || DEEPSEEK_API_BASE_URL;\n}', 12]
+  ,
+  ['src/main/priestess-provider.js',
+    '// Accept base URLs with or without /v1 (or a full /chat/completions path).\n// A trailing /anthropic (the Anthropic-format base DeepSeek documents for CLIs)\n// is OpenAI-incompatible — the gateway serves the OpenAI surface from the\n// root, so normalize it away before appending /v1/chat/completions.\nfunction chatCompletionsUrl(baseUrl) {\n  let base = String(baseUrl || "").trim().replace(/\\/+$/, "");\n  if (!base) return null;\n  if (base.endsWith("/chat/completions")) return base;\n  if (base.endsWith("/anthropic")) base = base.replace(/\\/anthropic$/, "");\n  if (base.endsWith("/v1")) return `${base}/chat/completions`;\n  return `${base}/v1/chat/completions`;\n}',
+    '// The OpenAI "root" behind a configured base URL. Gateways differ in where\n// they put it: the official API answers both https://api.deepseek.com/v1 and\n// the bare root, OpenRouter uses /api/v1, 火山方舟 /api/v3, and most local\n// servers /v1. So: a URL that already carries a version segment (/v1, /v2,\n// /api/v3, …) or a full …/chat/completions path is used as-is, anything else\n// gets the near-universal /v1 appended. A trailing /anthropic (the\n// Anthropic-format base DeepSeek documents for CLIs) is OpenAI-incompatible —\n// the gateway serves the OpenAI surface from the root, so normalize it away.\nfunction apiRoot(baseUrl) {\n  let base = String(baseUrl || "").trim().replace(/\\/+$/, "");\n  if (!base) return null;\n  base = base.replace(/\\/chat\\/completions$/, "").replace(/\\/anthropic$/, "");\n  if (!base) return null;\n  if (/\\/v\\d+$/.test(base)) return base;\n  return `${base}/v1`;\n}\n\nfunction chatCompletionsUrl(baseUrl) {\n  const root = apiRoot(baseUrl);\n  return root ? `${root}/chat/completions` : null;\n}', 12]
+  ,
+  ['src/main/priestess-provider.js',
+    '// Probe the server\'s /v1/models — verifies URL + key and returns the model ids\n// so the settings page can offer them as suggestions.\nasync function testConnection({ baseUrl, apiKey }) {\n  const base = String(baseUrl || "")\n    .trim()\n    .replace(/\\/+$/, "")\n    .replace(/\\/chat\\/completions$/, "")\n    .replace(/\\/anthropic$/, "")\n    .replace(/\\/v1$/, "");\n  if (!base) return { ok: false, error: "no server URL" };\n  try {\n    const res = await net.fetch(`${base}/v1/models`, {\n      headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},\n      cache: "no-store",\n      // Don\'t let a dead host hang the settings window on its TCP timeout.\n      signal: AbortSignal.timeout(TEST_TIMEOUT_MS)\n    });\n    if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };\n    const json = await res.json().catch(() => null);\n    const models = Array.isArray(json?.data)\n      ? json.data.map((m) => m?.id).filter(Boolean).slice(0, 100)\n      : [];\n    return { ok: true, models };\n  } catch (error) {\n    if (error?.name === "TimeoutError" || error?.name === "AbortError") {\n      return { ok: false, error: `连接超时（${TEST_TIMEOUT_MS / 1000} 秒）——请确认服务器地址与端口` };\n    }\n    return { ok: false, error: error?.message || String(error) };\n  }\n}',
+    '// Probe the server\'s model list — verifies URL + key and returns the model ids\n// so the settings page can offer them as suggestions. OpenRouter-style gateways\n// answer `${base}/v1/models` while some relays and local servers expose\n// `${base}/models` (or only strip /v1 from the root), so try both shapes.\nasync function testConnection({ baseUrl, apiKey }) {\n  const root = apiRoot(baseUrl);\n  if (!root) return { ok: false, error: "no server URL" };\n  // The bare URL (version segment stripped) is the fallback for relays that\n  // answer /models at the root only.\n  const bare = String(baseUrl || "")\n    .trim()\n    .replace(/\\/+$/, "")\n    .replace(/\\/chat\\/completions$/, "")\n    .replace(/\\/anthropic$/, "");\n  const roots = [root, bare].filter(\n    (value, index, all) => value && all.indexOf(value) === index\n  );\n  let lastError = "no server URL";\n  for (const root of roots) {\n    const modelsUrl = `${root}/models`;\n    try {\n      const res = await net.fetch(modelsUrl, {\n        headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},\n        cache: "no-store",\n        // Don\'t let a dead host hang the settings window on its TCP timeout.\n        signal: AbortSignal.timeout(TEST_TIMEOUT_MS)\n      });\n      if (!res.ok) {\n        lastError = `HTTP ${res.status}（${modelsUrl}）`;\n        continue;\n      }\n      const json = await res.json().catch(() => null);\n      const models = Array.isArray(json?.data)\n        ? json.data.map((m) => m?.id).filter(Boolean).slice(0, 100)\n        : [];\n      return { ok: true, models, endpoint: modelsUrl };\n    } catch (error) {\n      if (error?.name === "TimeoutError" || error?.name === "AbortError") {\n        lastError = `连接超时（${TEST_TIMEOUT_MS / 1000} 秒）——请确认服务器地址与端口`;\n      } else {\n        lastError = error?.message || String(error);\n      }\n    }\n  }\n  return { ok: false, error: lastError };\n}', 12]
+  ,
+  ['src/main/priestess-provider.js',
+    'module.exports = { startTurn, chatCompletionsUrl, testConnection, DEEPSEEK_API_BASE_URL };',
+    'module.exports = {\n  startTurn,\n  chatCompletionsUrl,\n  testConnection,\n  resolveDeepseekBaseUrl,\n  DEEPSEEK_API_BASE_URL\n};', 12]
+  ,
+  ['src/main/settings.js',
+    '  // Official DeepSeek API backend (https://api.deepseek.com) — the same\n  // built-in HTTP path as Priestess, but the base URL is fixed to DeepSeek\'s\n  // own endpoint so the Doctor only needs an API key. The key and optional\n  // model live ONLY in this local settings.json and are sent only to\n  // api.deepseek.com.\n  deepseekEnabled: false,\n  deepseekApiKey: "",\n  deepseekModel: "",',
+    '  // DeepSeek backend — an OpenAI-compatible chat backend for DeepSeek models.\n  // By default it talks to the official API (https://api.deepseek.com); set\n  // deepseekBaseUrl to any other OpenAI-compatible gateway that serves DeepSeek\n  // models (a relay/proxy such as one-api / new-api, SiliconFlow, OpenRouter,\n  // 火山方舟, or a local Ollama / LM Studio / vLLM) and the same backend reaches\n  // them instead. An empty base URL means "official endpoint". The key, the\n  // address and the optional model live ONLY in this local settings.json and\n  // are sent only to the address configured here.\n  deepseekEnabled: false,\n  deepseekBaseUrl: "",\n  deepseekApiKey: "",\n  deepseekModel: "",', 12]
+  ,
+  ['src/main/chat.js',
+    '// The DeepSeek backend is also HTTP-only — "available" when the Doctor enabled\n// it and provided an API key (the base URL is fixed to the official endpoint).\nfunction detectDeepseekProvider() {\n  const available =\n    Boolean(settings.get("deepseekEnabled")) &&\n    Boolean(String(settings.get("deepseekApiKey") || "").trim());',
+    '// The DeepSeek backend is also HTTP-only: "available" once the Doctor enabled\n// it, with either an API key or a keyless local gateway (Ollama, LM Studio, a\n// self-hosted relay) as its API address.\nfunction detectDeepseekProvider() {\n  const key = String(settings.get("deepseekApiKey") || "").trim();\n  const base = String(settings.get("deepseekBaseUrl") || "").trim();\n  const keylessLocal =\n    /^https?:\\/\\/(127\\.0\\.0\\.1|localhost|\\[::1\\]|0\\.0\\.0\\.0)(:\\d+)?(\\/|$)/i.test(base);\n  const available =\n    Boolean(settings.get("deepseekEnabled")) && Boolean(key || keylessLocal);', 12]
+  ,
+  ['src/main/chat.js',
+    '    baseUrl: priestessProvider.DEEPSEEK_API_BASE_URL,\n    apiKey: settings.get("deepseekApiKey"),\n    model: settings.get("deepseekModel"),\n    backendName: "DeepSeek",\n    settingsMenuHint: "请在托盘菜单「DeepSeek 设置…」中确认 API Key 与模型名。"',
+    '    baseUrl: priestessProvider.resolveDeepseekBaseUrl(settings.get("deepseekBaseUrl")),\n    apiKey: settings.get("deepseekApiKey"),\n    model: settings.get("deepseekModel"),\n    backendName: "DeepSeek",\n    settingsMenuHint: "请在托盘菜单「DeepSeek 设置…」中确认 API 地址、API Key 与模型名。"', 12]
+  ,
+  ['src/main/main.js',
+    '// DeepSeek backend config — read/written only to local settings.json. The base\n// URL is fixed to the official endpoint; the Doctor only manages the key and\n// the optional model.\nipcMain.handle("deepseek:get-config", () => ({\n  enabled: Boolean(settings.get("deepseekEnabled")),\n  baseUrl: priestessProvider.DEEPSEEK_API_BASE_URL,\n  apiKey: String(settings.get("deepseekApiKey") || ""),\n  model: String(settings.get("deepseekModel") || "")\n}));',
+    '// Keep the stored DeepSeek API address tidy: trim, drop trailing slashes, and\n// collapse the official endpoint (or an empty box) back to "" — the empty\n// string is the "official API" default, so the common case leaves no stale URL\n// behind in settings.json.\nfunction normalizeDeepseekBaseUrl(value) {\n  const base = String(value ?? "").trim().replace(/\\/+$/, "");\n  if (!base || base === priestessProvider.DEEPSEEK_API_BASE_URL) return "";\n  return base;\n}\n\n// DeepSeek backend config — read/written only to local settings.json. The API\n// address defaults to the official endpoint but may point at any\n// OpenAI-compatible gateway that serves DeepSeek models; the Doctor manages the\n// address, the key and the optional model.\nipcMain.handle("deepseek:get-config", () => ({\n  enabled: Boolean(settings.get("deepseekEnabled")),\n  baseUrl: String(settings.get("deepseekBaseUrl") || ""),\n  officialBaseUrl: priestessProvider.DEEPSEEK_API_BASE_URL,\n  apiKey: String(settings.get("deepseekApiKey") || ""),\n  model: String(settings.get("deepseekModel") || "")\n}));', 12]
+  ,
+  ['src/main/main.js',
+    '    deepseekEnabled: Boolean(cfg?.enabled),\n    deepseekApiKey: String(cfg?.apiKey ?? "").trim(),\n    deepseekModel: String(cfg?.model ?? "").trim()',
+    '    deepseekEnabled: Boolean(cfg?.enabled),\n    deepseekBaseUrl: normalizeDeepseekBaseUrl(cfg?.baseUrl),\n    deepseekApiKey: String(cfg?.apiKey ?? "").trim(),\n    deepseekModel: String(cfg?.model ?? "").trim()', 12]
+  ,
+  ['src/main/main.js',
+    '  priestessProvider.testConnection({\n    baseUrl: priestessProvider.DEEPSEEK_API_BASE_URL,\n    apiKey: String(cfg?.apiKey ?? settings.get("deepseekApiKey") ?? "")\n  })',
+    '  priestessProvider.testConnection({\n    baseUrl: priestessProvider.resolveDeepseekBaseUrl(\n      cfg?.baseUrl ?? settings.get("deepseekBaseUrl")\n    ),\n    apiKey: String(cfg?.apiKey ?? settings.get("deepseekApiKey") ?? "")\n  })', 12]
+  ,
+  ['src/main/main.js',
+    '//  DeepSeek backend settings — a small local-only window. The API\n//  key / model are stored in settings.json inside userData and are\n//  only ever sent to https://api.deepseek.com.\n// ============================================================\nfunction openDeepseekSettings() {\n  if (deepseekSettingsWindow && !deepseekSettingsWindow.isDestroyed()) {\n    deepseekSettingsWindow.show();\n    deepseekSettingsWindow.focus();\n    return;\n  }\n  deepseekSettingsWindow = new BrowserWindow({\n    width: 460,\n    height: 560,',
+    '//  DeepSeek backend settings — a small local-only window. The API\n//  address (official by default, or any OpenAI-compatible gateway),\n//  the key and the model are stored in settings.json inside userData\n//  and are only ever sent to the address configured here.\n// ============================================================\nfunction openDeepseekSettings() {\n  if (deepseekSettingsWindow && !deepseekSettingsWindow.isDestroyed()) {\n    deepseekSettingsWindow.show();\n    deepseekSettingsWindow.focus();\n    return;\n  }\n  deepseekSettingsWindow = new BrowserWindow({\n    width: 500,\n    height: 700,', 12]
+  ,
 ];
 
 // ── new files copied from the working tree ──
+// Entries may be tagged with a feature number, like the EDITS rows: a tagged
+// file is only copied when that feature is selected (or when no --only filter
+// is given). The DeepSeek settings page is tagged 12 because feature 12
+// rewrites it — copying it must never be skipped on a --only=12 run, while the
+// untagged files belong to the older patches and must NOT be copied then (a
+// newer release may have improved them since this table was written).
 const NEW_FILES = [
   'src/main/dsh-control.js',
   'src/main/feedback.js',
@@ -416,19 +477,31 @@ const NEW_FILES = [
   'src/renderer/feedback.js',
   'src/renderer/quicklaunch.html',
   'src/renderer/quicklaunch.js',
-  // feature 11: DeepSeek backend settings window
-  'src/renderer/deepseek-settings.html',
-  'src/renderer/deepseek-settings.js'
+  // feature 11/12: DeepSeek backend settings window
+  ['src/renderer/deepseek-settings.html', 12],
+  ['src/renderer/deepseek-settings.js', 12]
 ];
 
 // Apply the anchored edits in memory.
+// --only=N restricts the run to the entries tagged with that feature number
+// (currently feature 12 only); untagged entries belong to the older features.
+const onlyFeatureArg = process.argv.find((arg) => arg.startsWith('--only='));
+const onlyFeature = onlyFeatureArg ? Number(onlyFeatureArg.slice('--only='.length)) : null;
 const patched = new Map();
-for (const [rel, from, to] of EDITS) {
+for (const [rel, from, to, feature] of EDITS) {
+  if (onlyFeature && feature !== onlyFeature) continue;
   let src;
   if (patched.has(rel)) src = patched.get(rel);
   else { src = extractFile(rel).toString('utf8').replace(/\r\n/g, '\n'); patched.set(rel, src); }
   if (src.includes(to)) { console.log(`skip (already patched): ${rel}`); continue; }
   const count = src.split(from).length - 1;
+  if (count === 0 && skipMissing) {
+    // Either this edit's result was rewritten by a later edit (normal when
+    // replaying onto an asar that already carries patches) or the upstream
+    // source moved on. Either way there is nothing safe to anchor to.
+    console.log(`skip (anchor absent, --skip-missing): ${rel}`);
+    continue;
+  }
   if (count !== 1) {
     console.error(`EDIT FAILED (anchor matched ${count} times): ${rel}`);
     process.exit(1);
@@ -451,7 +524,9 @@ for (const [rel, content] of patched) {
   fs.writeFileSync(dest, content);
   console.log(`patched: ${rel}`);
 }
-for (const rel of NEW_FILES) {
+for (const entry of NEW_FILES) {
+  const [rel, feature] = Array.isArray(entry) ? entry : [entry, null];
+  if (onlyFeature && feature !== onlyFeature) continue;
   const dest = path.join(tmp, rel);
   fs.mkdirSync(path.dirname(dest), { recursive: true });
   fs.copyFileSync(path.join(SRC_TREE, rel), dest);

@@ -323,8 +323,9 @@ function openPriestessSettings() {
 
 // ============================================================
 //  DeepSeek backend settings — a small local-only window. The API
-//  key / model are stored in settings.json inside userData and are
-//  only ever sent to https://api.deepseek.com.
+//  address (official by default, or any OpenAI-compatible gateway),
+//  the key and the model are stored in settings.json inside userData
+//  and are only ever sent to the address configured here.
 // ============================================================
 function openDeepseekSettings() {
   if (deepseekSettingsWindow && !deepseekSettingsWindow.isDestroyed()) {
@@ -333,8 +334,8 @@ function openDeepseekSettings() {
     return;
   }
   deepseekSettingsWindow = new BrowserWindow({
-    width: 460,
-    height: 560,
+    width: 500,
+    height: 700,
     resizable: false,
     minimizable: false,
     maximizable: false,
@@ -3000,12 +3001,24 @@ ipcMain.handle("priestess:close-settings", () => {
   priestessSettingsWindow?.close();
 });
 
-// DeepSeek backend config — read/written only to local settings.json. The base
-// URL is fixed to the official endpoint; the Doctor only manages the key and
-// the optional model.
+// Keep the stored DeepSeek API address tidy: trim, drop trailing slashes, and
+// collapse the official endpoint (or an empty box) back to "" — the empty
+// string is the "official API" default, so the common case leaves no stale URL
+// behind in settings.json.
+function normalizeDeepseekBaseUrl(value) {
+  const base = String(value ?? "").trim().replace(/\/+$/, "");
+  if (!base || base === priestessProvider.DEEPSEEK_API_BASE_URL) return "";
+  return base;
+}
+
+// DeepSeek backend config — read/written only to local settings.json. The API
+// address defaults to the official endpoint but may point at any
+// OpenAI-compatible gateway that serves DeepSeek models; the Doctor manages the
+// address, the key and the optional model.
 ipcMain.handle("deepseek:get-config", () => ({
   enabled: Boolean(settings.get("deepseekEnabled")),
-  baseUrl: priestessProvider.DEEPSEEK_API_BASE_URL,
+  baseUrl: String(settings.get("deepseekBaseUrl") || ""),
+  officialBaseUrl: priestessProvider.DEEPSEEK_API_BASE_URL,
   apiKey: String(settings.get("deepseekApiKey") || ""),
   model: String(settings.get("deepseekModel") || "")
 }));
@@ -3013,6 +3026,7 @@ ipcMain.handle("deepseek:get-config", () => ({
 ipcMain.handle("deepseek:set-config", (_, cfg) => {
   settings.set({
     deepseekEnabled: Boolean(cfg?.enabled),
+    deepseekBaseUrl: normalizeDeepseekBaseUrl(cfg?.baseUrl),
     deepseekApiKey: String(cfg?.apiKey ?? "").trim(),
     deepseekModel: String(cfg?.model ?? "").trim()
   });
@@ -3023,7 +3037,9 @@ ipcMain.handle("deepseek:set-config", (_, cfg) => {
 
 ipcMain.handle("deepseek:test-connection", (_, cfg) =>
   priestessProvider.testConnection({
-    baseUrl: priestessProvider.DEEPSEEK_API_BASE_URL,
+    baseUrl: priestessProvider.resolveDeepseekBaseUrl(
+      cfg?.baseUrl ?? settings.get("deepseekBaseUrl")
+    ),
     apiKey: String(cfg?.apiKey ?? settings.get("deepseekApiKey") ?? "")
   })
 );

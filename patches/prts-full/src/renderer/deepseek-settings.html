@@ -112,14 +112,40 @@
     </style>
   </head>
   <body>
-    <h1>DeepSeek 后端 · DeepSeek API</h1>
+    <h1>DeepSeek 后端 · 官方 / 第三方 API</h1>
     <p class="note">
-      不依赖本地 CLI，直接连接 DeepSeek 官方 API（https://api.deepseek.com）。只需填入 API Key 即可让普瑞赛斯用 DeepSeek 说话。
+      不依赖本地 CLI：默认直连 DeepSeek 官方 API，也可以改成任意 OpenAI 兼容的服务地址（中转 / 代理站、云厂商、局域网里的模型服务），用它们来调用 DeepSeek 模型。
     </p>
 
     <div class="toggle-row">
       <input type="checkbox" id="enabled" />
       <label for="enabled">启用 DeepSeek 后端</label>
+    </div>
+
+    <div class="field">
+      <label class="field-label" for="baseUrl">API 地址（Base URL）</label>
+      <input
+        type="text"
+        id="baseUrl"
+        list="baseUrlList"
+        placeholder="留空 = 官方 https://api.deepseek.com"
+        spellcheck="false"
+      />
+      <datalist id="baseUrlList">
+        <option value="https://api.deepseek.com"></option>
+        <option value="https://api.siliconflow.cn/v1"></option>
+        <option value="https://openrouter.ai/api/v1"></option>
+        <option value="https://ark.cn-beijing.volces.com/api/v3"></option>
+        <option value="https://api.deepseek.com/anthropic"></option>
+        <option value="http://127.0.0.1:11434/v1"></option>
+        <option value="http://127.0.0.1:1234/v1"></option>
+      </datalist>
+      <div class="hint">
+        留空使用官方 <b>https://api.deepseek.com</b>；要换成第三方就在此填它的 OpenAI 兼容地址，
+        例如中转站 <b>https://你的域名/v1</b>、SiliconFlow、OpenRouter、火山方舟，
+        或本机的 Ollama / LM Studio / vLLM。可写域名根、<b>…/v1</b>、<b>…/api/v3</b> 或完整的
+        <b>…/v1/chat/completions</b>，程序会自动补全请求路径。
+      </div>
     </div>
 
     <div class="field">
@@ -129,8 +155,9 @@
         <button type="button" id="toggleKey" title="显示 / 隐藏">👁</button>
       </div>
       <div class="hint">
-        在 <a href="https://platform.deepseek.com/api_keys" id="keyLink">platform.deepseek.com</a> 创建。
-        🔒 密钥严格只保存在本机（数据目录的 settings.json），并且只发送给 api.deepseek.com。
+        官方 Key 在 <a href="https://platform.deepseek.com/api_keys" id="keyLink">platform.deepseek.com</a> 创建；
+        用第三方网关时填它发给你的 Key。本机服务（Ollama / LM Studio）不需要 Key，可留空。
+        🔒 密钥严格只保存在本机（数据目录的 settings.json），只会发送给上面填写的 API 地址。
       </div>
     </div>
 
@@ -140,8 +167,15 @@
       <datalist id="modelList">
         <option value="deepseek-chat"></option>
         <option value="deepseek-reasoner"></option>
+        <option value="deepseek-ai/DeepSeek-V3"></option>
+        <option value="deepseek-ai/DeepSeek-R1"></option>
+        <option value="Pro/deepseek-ai/DeepSeek-V3"></option>
+        <option value="deepseek/deepseek-chat"></option>
       </datalist>
-      <div class="hint">留空默认 deepseek-chat；deepseek-reasoner 为 R1 深度推理。点「测试连接」可列出账号下可选模型。</div>
+      <div class="hint">
+        官方留空即 deepseek-chat（deepseek-reasoner 为 R1 深度推理）；第三方网关的模型名各不相同
+        （常见如 <b>deepseek-ai/DeepSeek-V3</b>），点「测试连接」可拉取该地址下的可用模型再下拉选择。
+      </div>
     </div>
 
     <div class="row">
@@ -150,8 +184,8 @@
     </div>
 
     <div class="privacy">
-      隐私：以上配置只保存在本机数据目录的 settings.json 中，除了 api.deepseek.com 之外不会发送给任何人。
-      Your API key is stored locally only and is sent only to api.deepseek.com.
+      隐私：以上配置只保存在本机数据目录的 settings.json 中，除了你自己填写的 API 地址之外不会发送给任何人。
+      Your address and API key are stored locally only and are sent only to the API address you entered.
     </div>
 
     <div class="actions">

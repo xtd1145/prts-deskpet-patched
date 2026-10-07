@@ -559,12 +559,16 @@ function detectPriestessProvider() {
   };
 }
 
-// The DeepSeek backend is also HTTP-only — "available" when the Doctor enabled
-// it and provided an API key (the base URL is fixed to the official endpoint).
+// The DeepSeek backend is also HTTP-only: "available" once the Doctor enabled
+// it, with either an API key or a keyless local gateway (Ollama, LM Studio, a
+// self-hosted relay) as its API address.
 function detectDeepseekProvider() {
+  const key = String(settings.get("deepseekApiKey") || "").trim();
+  const base = String(settings.get("deepseekBaseUrl") || "").trim();
+  const keylessLocal =
+    /^https?:\/\/(127\.0\.0\.1|localhost|\[::1\]|0\.0\.0\.0)(:\d+)?(\/|$)/i.test(base);
   const available =
-    Boolean(settings.get("deepseekEnabled")) &&
-    Boolean(String(settings.get("deepseekApiKey") || "").trim());
+    Boolean(settings.get("deepseekEnabled")) && Boolean(key || keylessLocal);
   return {
     provider: PROVIDERS.DEEPSEEK,
     label: providerLabel(PROVIDERS.DEEPSEEK),
@@ -2543,11 +2547,11 @@ function launchDeepseekTurn(trimmed) {
   launchHttpBackendTurn({
     trimmed,
     provider: PROVIDERS.DEEPSEEK,
-    baseUrl: priestessProvider.DEEPSEEK_API_BASE_URL,
+    baseUrl: priestessProvider.resolveDeepseekBaseUrl(settings.get("deepseekBaseUrl")),
     apiKey: settings.get("deepseekApiKey"),
     model: settings.get("deepseekModel"),
     backendName: "DeepSeek",
-    settingsMenuHint: "请在托盘菜单「DeepSeek 设置…」中确认 API Key 与模型名。"
+    settingsMenuHint: "请在托盘菜单「DeepSeek 设置…」中确认 API 地址、API Key 与模型名。"
   });
 }
 
