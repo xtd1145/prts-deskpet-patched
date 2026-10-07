@@ -4,10 +4,12 @@
 // release.
 //
 // Usage:
-//   node build/release/trigger-mac-build.js [version] [--wait]
+//   node build/release/trigger-mac-build.js [version] [--wait] [--status]
 //
 //   version  defaults to package.json's version
 //   --wait   poll the run until it finishes (prints the html url meanwhile)
+//   --status do not dispatch anything: just report the latest runs and the
+//            assets currently attached to the v<version> release
 //
 // The token comes from the git credential manager; the workflow needs a token
 // with Actions write access (a classic PAT with the `workflow` scope works).
@@ -62,6 +64,28 @@ async function main() {
     "X-GitHub-Api-Version": "2022-11-28"
   };
   const base = `https://api.github.com/repos/${OWNER}/${REPO}/actions/workflows/${WORKFLOW}`;
+
+  if (args.includes("--status")) {
+    const runsRes = await request(`${base}/runs?event=workflow_dispatch&per_page=5`, { headers: auth });
+    const runs = (await runsRes.json()).workflow_runs || [];
+    console.log(`recent ${WORKFLOW} runs:`);
+    for (const run of runs.slice(0, 3)) {
+      console.log(`  ${run.id} status=${run.status} conclusion=${run.conclusion || "-"} ${run.html_url}`);
+    }
+    const relRes = await request(`https://api.github.com/repos/${OWNER}/${REPO}/releases/tags/v${version}`, {
+      headers: auth
+    });
+    if (relRes.ok) {
+      const release = await relRes.json();
+      console.log(`release v${version} assets:`);
+      for (const asset of release.assets || []) {
+        console.log(`  ${asset.name} (${(asset.size / 1024 / 1024).toFixed(1)} MB)`);
+      }
+    } else {
+      console.log(`release v${version}: HTTP ${relRes.status}`);
+    }
+    return;
+  }
 
   const dispatched = await request(`${base}/dispatches`, {
     method: "POST",
