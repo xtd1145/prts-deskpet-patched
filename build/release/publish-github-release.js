@@ -7,6 +7,7 @@
 //   version   defaults to the "version" field of package.json
 //   --notes   optional markdown file used as the release body
 //   --dry-run only list the assets that would be uploaded (no network)
+//   --update-notes rewrite the body of an already published release only
 //
 // The GitHub token is read from the git credential manager (the same stored
 // credential `git push` uses), so no token is written to disk. Building with
@@ -45,6 +46,24 @@ Windows 安装包见下方资产；安装过程中可选择一并安装 DeepSeek
 `;
 }
 
+// The network to api.github.com drops out regularly here, so every call gets a
+// few retries with growing backoff.
+async function fetchRetry(url, init, attempts = 5) {
+  let last;
+  for (let i = 1; i <= attempts; i += 1) {
+    try {
+      const res = await fetch(url, init);
+      if (res.status >= 500) throw new Error(`HTTP ${res.status}`);
+      return res;
+    } catch (error) {
+      last = error;
+      console.log(`  request attempt ${i} failed: ${error.message}`);
+      await new Promise((resolve) => setTimeout(resolve, 5000 * i));
+    }
+  }
+  throw last;
+}
+
 async function main() {
   const auth = {
     Authorization: `Bearer ${token()}`,
@@ -54,6 +73,24 @@ async function main() {
   const body = notesArg
     ? fs.readFileSync(path.resolve(ROOT, notesArg.slice("--notes=".length)), "utf8")
     : defaultBody();
+
+  // --update-notes rewrites only the release body (no build, no upload) — the
+  // way to amend a release that is already published.
+  if (args.includes("--update-notes")) {
+    const found = await fetchRetry(`https://api.github.com/repos/${OWNER}/${REPO}/releases/tags/${tag}`, {
+      headers: auth
+    });
+    if (!found.ok) throw new Error(`release ${tag} not found (HTTP ${found.status})`);
+    const release = await found.json();
+    const patched = await fetchRetry(`https://api.github.com/repos/${OWNER}/${REPO}/releases/${release.id}`, {
+      method: "PATCH",
+      headers: { ...auth, "Content-Type": "application/json" },
+      body: JSON.stringify({ body })
+    });
+    if (!patched.ok) throw new Error(`update failed: ${patched.status} ${await patched.text()}`);
+    console.log(`notes updated for ${tag}: ${(await patched.json()).html_url}`);
+    return;
+  }
 
   const assets = fs
     .readdirSync(RELEASE_DIR)
@@ -70,7 +107,7 @@ async function main() {
     return;
   }
 
-  const existing = await fetch(
+  const existing = await fetchRetry(
     `https://api.github.com/repos/${OWNER}/${REPO}/releases/tags/${tag}`,
     { headers: auth }
   );
@@ -79,7 +116,7 @@ async function main() {
     release = await existing.json();
     console.log(`release ${tag} already exists (#${release.id})`);
   } else {
-    const created = await fetch(`https://api.github.com/repos/${OWNER}/${REPO}/releases`, {
+    const created = await fetchRetry(`https://api.github.com/repos/${OWNER}/${REPO}/releases`, {
       method: "POST",
       headers: { ...auth, "Content-Type": "application/json" },
       body: JSON.stringify({ tag_name: tag, name: `PRTS 桌宠 ${tag}`, body, draft: false, prerelease: false })
@@ -97,7 +134,7 @@ async function main() {
       continue;
     }
     const data = fs.readFileSync(path.join(RELEASE_DIR, name));
-    const res = await fetch(`${uploadBase}?name=${encodeURIComponent(name)}`, {
+    const res = await fetchRetry(`${uploadBase}?name=${encodeURIComponent(name)}`, {
       method: "POST",
       headers: {
         ...auth,
