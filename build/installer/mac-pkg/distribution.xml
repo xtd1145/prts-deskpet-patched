@@ -8,10 +8,10 @@
     <line choice="appChoice" />
     <line choice="dshChoice" />
   </choices-outline>
-  <choice id="appChoice" title="PRTS 主程序" description="普瑞赛斯桌宠（完整版，含全部补丁）。" selected="YES">
+  <choice id="appChoice" title="PRTS 主程序" description="普瑞赛斯桌宠（完整版，含全部补丁）。" selected="true">
     <pkg-ref id="com.prts.app" />
   </choice>
-  <choice id="dshChoice" title="DeepSeek Harness" description="DSH Web 服务（127.0.0.1:3080），为普瑞赛斯提供 AI 控制能力。首次启动应用时会自动完成下载与配置（需 Node.js &gt;= 22）。" selected="YES">
+  <choice id="dshChoice" title="DeepSeek Harness" description="DSH Web 服务（127.0.0.1:3080），为普瑞赛斯提供 AI 控制能力。首次启动应用时会自动完成下载与配置（需 Node.js &gt;= 22）。" selected="true">
     <pkg-ref id="com.prts.dsh" />
   </choice>
   <pkg-ref id="com.prts.app" version="__VERSION__" onConclusion="none">PRTS-app.pkg</pkg-ref>
